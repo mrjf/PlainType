@@ -41,8 +41,9 @@ description: "Per-user display settings"
 Named schemas are ***plain concepts (`:DisplaySettings:`), properties are
 `name - description - constraint.` attributes, and reusable definitions follow
 the root in the same `***definitions***` list. `Defaults to …` and
-`For example: …` become JSON Schema's `default` and `examples`. The frontmatter
-and `>` comment are module notes that the compiler ignores. The pair is
+`For example: …` become JSON Schema's `default` and `examples`, and a `>`
+comment above a declaration becomes its `$comment`. The frontmatter is module
+metadata that the compiler ignores. The pair is
 [display-settings.plain.plaintype](examples/display-settings.plain.plaintype)
 and [display-settings.schema.json](examples/display-settings.schema.json); the
 [version-3 section of the language contract](docs/language.md#version-3-plain-aligned-grammar)

@@ -8,8 +8,8 @@ describe("derive", () => {
     expect(view.natlang.text).toContain("its border is always red");
     expect(view.compiled.ok && view.compiled.formatted).toBe(view.raw.text);
     if (view.compiled.ok) {
-      const radius = JSON.parse(view.compiled.json).properties.cornerRadius;
-      expect([radius.default, JSON.parse(view.compiled.json).properties.label.examples]).toEqual([4, ["Buy now"]]);
+      const schema = JSON.parse(view.compiled.json);
+      expect([schema.$comment, schema.properties.priority.examples]).toEqual(["This is a rough draft.", [2]]);
     }
     expect(view.slots.every((slot) => slot.inNatlang && slot.inPlainType)).toBe(true);
     if (view.compiled.ok) {
@@ -30,7 +30,7 @@ describe("derive", () => {
   test("an invalid value surfaces as a compile error with a line number", () => {
     const view = derive({ ...SEED, values: { ...SEED.values, labelMax: "lots" } });
     expect(view.compiled.ok).toBe(false);
-    if (!view.compiled.ok) expect(view.compiled.line).toBe(6);
+    if (!view.compiled.ok) expect(view.compiled.line).toBe(7);
   });
 
   test("filo byte ranges account for multi-byte characters", () => {

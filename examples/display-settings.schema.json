@@ -2,6 +2,7 @@
   "title": "DisplaySettings",
   "type": "object",
   "description": "How the app is displayed for one user.",
+  "$comment": "Shared by the web and desktop clients.",
   "properties": {
     "theme": {
       "description": "The color theme",

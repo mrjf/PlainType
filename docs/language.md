@@ -436,7 +436,7 @@ Version 3 carries exactly the version-2 declaration model, but spells it with
 the conventions of the [***plain](https://plainlang.org/docs/language-guide/basic-syntax)
 specification language, so a PlainType file reads like a ***plain
 `***definitions***` section. It adds two annotation sentences, for `default` and
-`examples`.
+`examples`, and it maps `>` comments to `$comment`.
 
 ```plain
 ---
@@ -463,7 +463,7 @@ description: "Per-user display settings"
 | `***section***` headers | Declarations live in exactly one `***definitions***` section after the header. Any other section is an error, because a PlainType module only defines data. |
 | Concepts written `:ConceptName:` using letters, digits, `+`, `-`, `.`, and `_` | Every named schema (the root, union alternatives, and definitions) is a concept: `- :Animal: A reusable animal record.` References name the concept: `an :Animal:`, `an array of :Animal:`. |
 | Definitions start with the concept name; attributes are nested `Name - description` bullets | Properties are attributes: `- name - The animal's name - a string containing at least one character.` |
-| Lines starting with `>` are comments | Ignored anywhere after the header, at any indentation. They are not schema data, so `format` does not reproduce them. |
+| Lines starting with `>` are comments | A comment inside `***definitions***` describes the declaration below it and compiles to that schema's `$comment`. See [Comments](#comments). Comments before the section are module notes: they are ignored, and `format` does not reproduce them. |
 | Markdown links to files in the module's folder are linked resources | A `$ref` to a relative path inside the folder is written `a reference to [path](path)`. The link text must equal its target. Other references keep `a reference to "URI"`. |
 | Liquid templates expand textually before interpretation | PlainType parses the expanded text. `{{ variable }}` placeholders, as used by the demo's templates, must be filled in before compiling. |
 
@@ -525,6 +525,37 @@ enums: `"a"`, `"a" or "b"`, `"a", "b", or "c"`. Unlike enums, any JSON values
 are allowed, including objects, arrays, and repeats. A leaf whose `default` and
 `examples` appear in another order, or whose `examples` array is empty, uses
 the exact escape.
+
+### Comments
+
+JSON Schema's `$comment` is a note for schema maintainers with no validation
+effect. In version 3 it is written as `>` lines directly above the declaration
+it belongs to: a root, union, alternative, definition, nested object, or leaf.
+
+```plain
+> This is a rough draft.
+- :Button: A clickable control.
+  > Product wants this configurable later.
+  - borderColor - The color of its border - "red".
+```
+
+| Position | `$comment` member order |
+| --- | --- |
+| Object | after `description`, before `properties` |
+| Union | after `description`, before `oneOf` |
+| Leaf | after `description`, before the constraint members |
+
+Consecutive `>` lines join with line breaks, and a bare `>` is an empty line.
+One space after `>` is removed. Blank lines may separate a comment from its
+declaration, but a comment must have a declaration after it. A comment cannot
+describe a boolean marker, an `Exact JSON Schema:` clause, or an
+additional-properties directive; an exact schema carries its own `$comment`
+inside the JSON. A `$comment` in another position, or one containing control
+characters or trailing whitespace on a line, uses the exact escape.
+
+Comments between the header and `***definitions***` are module notes that do
+not belong to any schema. They are ignored and not reproduced by `format`. Use
+frontmatter for module notes that should survive formatting.
 
 ### Version-3 round trips
 

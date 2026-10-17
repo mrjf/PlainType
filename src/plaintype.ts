@@ -171,13 +171,13 @@ function parsePlainTypeDocument(source: string): ParsedDocument {
     throw new PlainTypeSyntaxError(`YAML frontmatter requires ${HEADER_V3}`, frontmatterLine);
   }
 
-  const bodyLines = version === 3 ? stripV3SectionsAndComments(lines, headerIndex + 1) : lines;
-  const bullets = parseBullets(bodyLines, headerIndex + 1);
+  const v3Body = version === 3 ? stripV3SectionsAndComments(lines, headerIndex + 1) : null;
+  const bullets = parseBullets(v3Body?.lines ?? lines, headerIndex + 1);
   if (bullets.length === 0) {
     throw new PlainTypeSyntaxError("Expected at least one schema clause", headerIndex + 2);
   }
-  const schema = version === 3
-    ? schemaFromV3Bullets(bullets)
+  const schema = v3Body !== null
+    ? schemaFromV3Bullets(bullets, v3Body.comments)
     : version === 2
       ? schemaFromV2Bullets(bullets)
       : schemaFromBullets(bullets);
@@ -199,13 +199,29 @@ function skipBlankLines(lines: readonly string[], start: number): number {
  * Version 3 follows ***plain's file layout: `>` lines are comments, and the
  * declarations live in the one `***definitions***` section. Both are blanked
  * here (keeping line numbers) so the shared bullet parser sees only clauses.
+ *
+ * A comment inside the section describes the declaration that follows it and
+ * becomes that schema's `$comment`; consecutive lines join with line breaks.
+ * Comments before the section are module notes and are not compiled.
  */
-function stripV3SectionsAndComments(lines: readonly string[], start: number): string[] {
+function stripV3SectionsAndComments(
+  lines: readonly string[],
+  start: number,
+): { lines: string[]; comments: Map<number, string> } {
   const result = [...lines];
+  const comments = new Map<number, string>();
+  let pending: string[] = [];
+  let pendingLine = 0;
   let sawSection = false;
   for (let index = start; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
-    if (/^ *>/.test(line)) {
+    const comment = /^ *>( ?)([\s\S]*)$/.exec(line);
+    if (comment !== null) {
+      if (line.includes("\t")) throw new PlainTypeSyntaxError("Tabs are not allowed in comments", index + 1);
+      if (sawSection) {
+        if (pending.length === 0) pendingLine = index + 1;
+        pending.push(comment[2] ?? "");
+      }
       result[index] = "";
       continue;
     }
@@ -225,9 +241,16 @@ function stripV3SectionsAndComments(lines: readonly string[], start: number): st
     if (!sawSection && line.trim() !== "") {
       throw new PlainTypeSyntaxError(`Expected ${V3_DEFINITIONS_SECTION} before the first definition`, index + 1);
     }
+    if (line.trim() !== "" && pending.length > 0) {
+      comments.set(index + 1, pending.join("\n"));
+      pending = [];
+    }
   }
   if (!sawSection) throw new PlainTypeSyntaxError(`Expected a ${V3_DEFINITIONS_SECTION} section`, start + 1);
-  return result;
+  if (pending.length > 0) {
+    throw new PlainTypeSyntaxError("A comment must be followed by the declaration it describes", pendingLine);
+  }
+  return { lines: result, comments };
 }
 
 const STYLE_FOR_VERSION: Readonly<Record<PlainTypeVersion, RenderStyle>> = {
@@ -611,6 +634,8 @@ function renderSchemaArray(
 interface V2ObjectPlan {
   readonly name: string | null;
   readonly description: string;
+  /** Version 3: `$comment`, rendered as `>` lines above the declaration. */
+  readonly comment: string | null;
   readonly properties: JsonObject;
   readonly requiredNames: readonly string[];
   readonly definitions: JsonObject | null;
@@ -619,6 +644,7 @@ interface V2ObjectPlan {
 
 interface V2LeafPlan {
   readonly description: string;
+  readonly comment: string | null;
   readonly constraint: string;
   /** Version 3 only: trailing ` Defaults to …. For example: ….` sentences. */
   readonly annotations: string;
@@ -627,6 +653,7 @@ interface V2LeafPlan {
 interface V2UnionPlan {
   readonly name: string;
   readonly description: string;
+  readonly comment: string | null;
   readonly alternatives: readonly JsonNode[];
 }
 
@@ -640,6 +667,8 @@ interface V2Declaration {
 interface V2ReferenceContext {
   readonly rootName: string | null;
   readonly definitionNames: ReadonlySet<string>;
+  /** Version 3: `$comment` text keyed by the line of the declaration it precedes. */
+  readonly comments?: ReadonlyMap<number, string>;
 }
 
 /** Render the compact version-2 conversational grammar, with an exact universal escape. */
@@ -718,6 +747,9 @@ function v2ObjectPlan(
   }
   index += 1;
 
+  const comment = version === 3 ? v3Comment(node.entries[index]) : null;
+  if (comment !== null) index += 1;
+
   const properties = node.entries[index];
   if (
     properties?.key !== "properties" ||
@@ -793,6 +825,7 @@ function v2ObjectPlan(
   return {
     name,
     description: description.value.value,
+    comment,
     properties: properties.value,
     requiredNames,
     definitions,
@@ -817,6 +850,8 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: Conver
     return null;
   }
   let rest = node.entries.slice(1);
+  const comment = version === 3 ? v3Comment(rest[0]) : null;
+  if (comment !== null) rest = rest.slice(1);
   let annotations = "";
   if (version === 3) {
     // Fixed order after the constraint members: `default`, then `examples`.
@@ -834,12 +869,29 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: Conver
   const constraint = renderV2Constraint(rest, context, version);
   return constraint === null
     ? null
-    : { description: description.value.value, constraint, annotations };
+    : { description: description.value.value, comment, constraint, annotations };
+}
+
+/** A `$comment` member that `>` lines can carry exactly. */
+function v3Comment(entry: JsonObjectEntry | undefined): string | null {
+  if (entry?.key !== "$comment" || entry.value.type !== "string") return null;
+  const value = entry.value.value;
+  const linesSafe = value.split("\n").every((line) =>
+    !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(line) && !/\s$/u.test(line)
+  );
+  return linesSafe && !hasUnpairedSurrogate(value) ? value : null;
+}
+
+function renderV3Comment(comment: string | null, depth: number): string[] {
+  if (comment === null) return [];
+  return comment.split("\n").map((line) => `${indent(depth)}>${line === "" ? "" : ` ${line}`}`);
 }
 
 function v2UnionPlan(node: JsonObject, version: ConversationalVersion): V2UnionPlan | null {
-  if (node.entries.length !== 3) return null;
-  const [title, description, oneOf] = node.entries;
+  const comment = version === 3 && node.entries.length === 4 ? v3Comment(node.entries[2]) : null;
+  if (node.entries.length !== (comment === null ? 3 : 4)) return null;
+  const [title, description] = node.entries;
+  const oneOf = node.entries.at(-1);
   if (
     title?.key !== "title" || title.value.type !== "string" ||
     (version === 3 && !isConceptName(title.value.value)) ||
@@ -853,6 +905,7 @@ function v2UnionPlan(node: JsonObject, version: ConversationalVersion): V2UnionP
   return {
     name: title.value.value,
     description: description.value.value,
+    comment,
     alternatives: oneOf.value.items,
   };
 }
@@ -865,7 +918,7 @@ function renderV2Union(
   version: ConversationalVersion,
 ): string[] {
   const head = version === 3 ? `${conceptToken(plan.name)} ` : `${renderPropertyName(plan.name)}: `;
-  const lines = [`${indent(depth)}- ${head}${plan.description}${V2_UNION_SUFFIX}`];
+  const lines = [...renderV3Comment(plan.comment, depth), `${indent(depth)}- ${head}${plan.description}${V2_UNION_SUFFIX}`];
   for (const alternative of plan.alternatives) {
     lines.push(...renderV2SchemaAlternative(alternative, depth + 1, dialect, context, version));
   }
@@ -889,7 +942,7 @@ function renderV2Object(
     : propertyContext
       ? `${renderPropertyName(name)}${marker} - `
       : `${conceptToken(name)} `;
-  const lines = [`${indent(depth)}- ${head}${plan.description}`];
+  const lines = [...renderV3Comment(plan.comment, depth), `${indent(depth)}- ${head}${plan.description}`];
   const required = new Set(plan.requiredNames);
   for (const property of plan.properties.entries) {
     const propertyOptional = !required.has(property.key);
@@ -912,6 +965,7 @@ function renderV2Object(
     if (leaf === null) throw new TypeError("A planned v2 property became unrenderable");
     const optionalMarker = propertyOptional ? " (optional)" : "";
     const separator = version === 2 ? ":" : " -";
+    lines.push(...renderV3Comment(leaf.comment, depth + 1));
     lines.push(
       `${indent(depth + 1)}- ${renderPropertyName(property.key)}${optionalMarker}${separator} ${leaf.description} - ${leaf.constraint}${leaf.annotations}.`,
     );
@@ -1172,10 +1226,10 @@ function schemaFromV2Bullets(bullets: readonly Bullet[]): JsonNode {
  * Version 3: the `***definitions***` list holds the root schema first and its
  * reusable `$defs` after it, each written as a ***plain concept definition.
  */
-function schemaFromV3Bullets(bullets: readonly Bullet[]): JsonNode {
+function schemaFromV3Bullets(bullets: readonly Bullet[], comments: ReadonlyMap<number, string>): JsonNode {
   const [root, ...definitions] = bullets;
   if (root === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
-  const context = v3ReferenceContextFromBullets(root, definitions);
+  const context = { ...v3ReferenceContextFromBullets(root, definitions), comments };
   if (isV2MarkerClause(root.text)) {
     if (definitions[0] !== undefined) {
       throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
@@ -1245,6 +1299,9 @@ function schemaFromV2Bullet(
   allowDefinitions: boolean,
   version: ConversationalVersion,
 ): JsonNode {
+  if (isV2MarkerClause(bullet.text) && context.comments?.has(bullet.line)) {
+    throw new PlainTypeSyntaxError("A comment cannot describe this clause; put $comment inside an exact JSON Schema", bullet.line);
+  }
   if (bullet.text === ALLOW_ALL || bullet.text === DENY_ALL) {
     requireNoChildren(bullet);
     return { type: "boolean", value: bullet.text === ALLOW_ALL };
@@ -1279,6 +1336,7 @@ function schemaFromV2Bullet(
   return objectNode([
     { key: "title", value: { type: "string", value: declaration.name } },
     { key: "description", value: { type: "string", value: description } },
+    ...commentEntries(bullet, context),
     {
       key: "oneOf",
       value: arrayNode(bullet.children.map((child) => schemaFromV2Bullet(child, context, false, version))),
@@ -1309,6 +1367,9 @@ function schemaFromV2Object(
   for (const [index, child] of bullet.children.entries()) {
     if (child.text === V2_ADDITIONAL_ALLOWED || child.text === V2_ADDITIONAL_UNSPECIFIED) {
       requireNoChildren(child);
+      if (context.comments?.has(child.line)) {
+        throw new PlainTypeSyntaxError("A comment cannot describe an additional-properties directive", child.line);
+      }
       if (sawAdditionalDirective) {
         throw new PlainTypeSyntaxError("An object may have only one additional-properties directive", child.line);
       }
@@ -1383,6 +1444,7 @@ function schemaFromV2Object(
     ...(named ? [{ key: "title", value: { type: "string", value: declaration.name } } as JsonObjectEntry] : []),
     { key: "type", value: { type: "string", value: "object" } },
     { key: "description", value: { type: "string", value: declaration.body } },
+    ...commentEntries(bullet, context),
     { key: "properties", value: objectNode(properties) },
     { key: "required", value: arrayNode(required) },
     ...(definitions === null
@@ -1428,10 +1490,16 @@ function propertyFromV2Bullet(
     optional: declaration.optional,
     schema: objectNode([
       { key: "description", value: { type: "string", value: description } },
+      ...commentEntries(bullet, context),
       ...entriesFromV2Constraint(constraint, bullet.line, context, version),
       ...annotations,
     ]),
   };
+}
+
+function commentEntries(bullet: Bullet, context: V2ReferenceContext): JsonObjectEntry[] {
+  const comment = context.comments?.get(bullet.line);
+  return comment === undefined ? [] : [{ key: "$comment", value: { type: "string", value: comment } }];
 }
 
 /** Split `constraint. Defaults to X. For example: A or B` into the constraint and annotation members. */

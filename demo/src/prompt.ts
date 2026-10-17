@@ -28,7 +28,8 @@ Output two things:
 What becomes a slot:
 - type names (the root name, alternative names, definition names), counts and numeric bounds, string constants, enum members, defaults, examples, and other specific values the user stated.
 - The value must be copied character for character from the natural-language description, because the demo highlights it there. If the description says "red", the value is "red" and the template writes "{{borderColor}}" inside the JSON string quotes, as in: - "{{borderColor}}". A slotted concept name keeps its colons in the template: - :{{typeName}}: A clickable control.
-- When the description gives a default value or an example, use the "Defaults to …." and "For example: …." sentences after the constraint.
+- When the description gives a default value or an example (including "e.g.", "such as", "like"), use the "Defaults to …." and "For example: …." sentences after the constraint.
+- Remarks about the description or the data rather than its shape (for example "This is a rough draft." or "We may change this later.") become ">" comment lines directly above the declaration they concern, which compile to $comment. A remark about the whole description goes above the root concept. Slot the comment text when it is copied verbatim, as in: > {{draftNote}}
 - If a value cannot be copied verbatim from the description (for example the text says "one" but the grammar needs the digit 1), write it literally in the template instead of making it a slot.
 - Do not slot grammar words, property descriptions, or punctuation.
 
@@ -64,16 +65,17 @@ export async function buildSystemPrompt(): Promise<string> {
     settings.trim(),
     "</example>",
     "<example name=\"template with slots\">",
-    "Description: A Button is a clickable control. Its label is between 1 and 24 characters long, like \"Buy now\", and its border is always red.",
+    "Description: This is a rough draft. A Button is a clickable control. Its label is between 1 and 24 characters long, like \"Buy now\", and its border is always red.",
     "plaintypeTemplate:",
     "***plaintype 3***",
     "",
     "***definitions***",
     "",
+    "> {{draftNote}}",
     "- :{{typeName}}: A clickable control.",
     "  - label - The text shown on the control - a string between {{labelMin}} and {{labelMax}} characters. For example: \"{{labelExample}}\".",
     "  - borderColor - The color of its border - \"{{borderColor}}\".",
-    "slots: typeName=Button, labelMin=1, labelMax=24, labelExample=Buy now, borderColor=red",
+    "slots: draftNote=This is a rough draft., typeName=Button, labelMin=1, labelMax=24, labelExample=Buy now, borderColor=red",
     "</example>",
   ].join("\n");
 }

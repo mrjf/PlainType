@@ -58,29 +58,34 @@ export interface DerivedView {
 
 export const SEED: DemoState = {
   natTemplate:
-    'A {{typeName}} is a clickable control. Its label is between {{labelMin}} and {{labelMax}} characters long, like "{{labelExample}}", ' +
-    "its border is always {{borderColor}}, and it may have a corner radius between {{radiusMin}} and {{radiusMax}} pixels, " +
-    "{{radiusDefault}} by default.",
+    "{{draftNote}}\n\n" +
+    "A {{typeName}} is a clickable control. Its label is between {{labelMin}} and {{labelMax}} characters long, " +
+    "its border is always {{borderColor}}, and it may have a corner radius between {{radiusMin}} and {{radiusMax}} pixels. " +
+    "It has a priority level between {{priorityMin}} and {{priorityMax}} e.g. {{priorityExample}}",
   ptTemplate: [
     "***plaintype 3***",
     "",
     "***definitions***",
     "",
+    "> {{draftNote}}",
     "- :{{typeName}}: A clickable control.",
-    '  - label - The text shown on the control - a string between {{labelMin}} and {{labelMax}} characters. For example: "{{labelExample}}".',
+    "  - label - The text shown on the control - a string between {{labelMin}} and {{labelMax}} characters.",
     '  - borderColor - The color of its border - "{{borderColor}}".',
-    "  - cornerRadius (optional) - The corner radius in pixels - an integer between {{radiusMin}} and {{radiusMax}}. Defaults to {{radiusDefault}}.",
+    "  - cornerRadius (optional) - The corner radius in pixels - an integer between {{radiusMin}} and {{radiusMax}}.",
+    "  - priority - The priority level - an integer between {{priorityMin}} and {{priorityMax}}. For example: {{priorityExample}}.",
     "",
   ].join("\n"),
   values: {
+    draftNote: "This is a rough draft.",
     typeName: "Button",
     labelMin: "1",
     labelMax: "24",
-    labelExample: "Buy now",
     borderColor: "red",
     radiusMin: "0",
     radiusMax: "32",
-    radiusDefault: "4",
+    priorityMin: "1",
+    priorityMax: "5",
+    priorityExample: "2",
   },
 };
 

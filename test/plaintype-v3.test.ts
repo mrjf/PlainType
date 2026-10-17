@@ -166,25 +166,92 @@ ${HEAD}- :Flag: A flag.
   );
 });
 
-test("> lines are comments anywhere after the header", () => {
+test("> lines describe the next declaration and compile to $comment", () => {
   const source = `***plaintype 3***
-> Shared by the billing service.
+> A module note: not compiled.
 
 ***definitions***
 
-> The root schema comes first.
+> This is a rough draft.
+> Totals are reviewed weekly.
 - :Invoice: An invoice.
-  > Totals are in cents.
+  > Stored in cents.
   - total - The total - a non-negative integer.
+  > Who pays.
+  - payer - The paying party.
+    - email - Their address - an email string.
 `;
   assert.deepEqual(compile(source), {
     title: "Invoice",
     type: "object",
     description: "An invoice.",
-    properties: { total: { description: "The total", type: "integer", minimum: 0 } },
-    required: ["total"],
+    $comment: "This is a rough draft.\nTotals are reviewed weekly.",
+    properties: {
+      total: { description: "The total", $comment: "Stored in cents.", type: "integer", minimum: 0 },
+      payer: {
+        type: "object",
+        description: "The paying party.",
+        $comment: "Who pays.",
+        properties: { email: { description: "Their address", type: "string", format: "email" } },
+        required: ["email"],
+        additionalProperties: false,
+      },
+    },
+    required: ["total", "payer"],
     additionalProperties: false,
   });
+  const canonical = formatPlainType(source);
+  assert.doesNotMatch(canonical, /module note/);
+  assert.match(canonical, /\*\*\*definitions\*\*\*\n\n> This is a rough draft\.\n> Totals are reviewed weekly\.\n- :Invoice:/);
+  assert.equal(fromJsonSchema(toJsonSchema(source), { style: "plain" }), canonical);
+});
+
+test("$comment round-trips on roots, unions, alternatives, definitions and leaves", () => {
+  const json = JSON.stringify({
+    title: "Id",
+    description: "An identifier.",
+    $comment: "Union note.",
+    oneOf: [
+      {
+        title: "Chip",
+        type: "object",
+        description: "A chip.",
+        $comment: "Line one.\n\n  Indented line three.",
+        properties: { n: { description: "Its number", $comment: "Leaf note.", type: "string", examples: ["1"] } },
+        required: ["n"],
+        additionalProperties: false,
+      },
+    ],
+  });
+  const plain = assertV3RoundTrip(json);
+  assert.equal(
+    plain,
+    `${HEAD}> Union note.
+- :Id: An identifier. Exactly one of:
+  > Line one.
+  >
+  >   Indented line three.
+  - :Chip: A chip.
+    > Leaf note.
+    - n - Its number - a string. For example: "1".
+`,
+  );
+});
+
+test("comments the > form cannot carry exactly, or misplaced comments, are handled safely", () => {
+  const trailing = JSON.stringify({ title: "T", type: "object", description: "T.", $comment: "ends with space ", properties: {}, required: [] });
+  assert.match(assertV3RoundTrip(trailing), /- Exact JSON Schema:/);
+  const late = JSON.stringify({ description: "A", type: "string", $comment: "after the constraint" });
+  assert.match(
+    assertV3RoundTrip(JSON.stringify({ title: "T", type: "object", description: "T.", properties: { a: JSON.parse(late) }, required: [] })),
+    /- Exact JSON Schema:/,
+  );
+  assert.throws(() => toJsonSchema(`${HEAD}- :A: A.\n> dangling`), /A comment must be followed by the declaration it describes at line 6/);
+  assert.throws(() => toJsonSchema(`${HEAD}> note\n- Every instance is accepted.`), /cannot describe this clause/);
+  assert.throws(
+    () => toJsonSchema(`${HEAD}- :A: A.\n  > note\n  - Additional properties allowed`),
+    /cannot describe an additional-properties directive at line 7/,
+  );
 });
 
 test("the ***definitions*** section is required, unique, and the only section", () => {
