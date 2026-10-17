@@ -11,11 +11,42 @@ Its primary invariant is:
 JSON Schema -> PlainType -> JSON Schema = the same JSON data
 ```
 
-PlainType has two versioned surfaces. Version 1 is the complete, structured
+PlainType has three versioned surfaces. Version 1 is the complete, structured
 notation for Draft 2020-12. Version 2 is a compact conversational notation for
 common object, property, and union shapes, backed by an exact whole-schema
-escape. Schemas from older, custom, and future dialects remain lossless; their
-semantics are not guessed.
+escape. Version 3 is the same compact model written in ***plain's own syntax
+(concepts, attributes, sections, frontmatter, `>` comments, linked resources),
+plus sentences for defaults and examples. Schemas from older, custom, and
+future dialects remain lossless; their semantics are not guessed.
+
+## ***plain-aligned example (version 3)
+
+```plain
+---
+description: "Per-user display settings"
+---
+
+***plaintype 3***
+
+***definitions***
+
+> Shared by the web and desktop clients.
+- :DisplaySettings: How the app is displayed for one user.
+  - theme - The color theme - one of "light", "dark", or "system". Defaults to "system". For example: "dark".
+  - fontSize - The body font size in points - an integer between 8 and 72. Defaults to 14.
+  - displayName (optional) - The name shown in the header - a string between 1 and 40 characters. For example: "Ada" or "Grace Hopper".
+  - stylesheet (optional) - Extra CSS rules - a reference to [styles/custom.schema.json](styles/custom.schema.json).
+```
+
+Named schemas are ***plain concepts (`:DisplaySettings:`), properties are
+`name - description - constraint.` attributes, and reusable definitions follow
+the root in the same `***definitions***` list. `Defaults to …` and
+`For example: …` become JSON Schema's `default` and `examples`. The frontmatter
+and `>` comment are module notes that the compiler ignores. The pair is
+[display-settings.plain.plaintype](examples/display-settings.plain.plaintype)
+and [display-settings.schema.json](examples/display-settings.schema.json); the
+[version-3 section of the language contract](docs/language.md#version-3-plain-aligned-grammar)
+maps each ***plain convention.
 
 ## Conversational example (version 2)
 
@@ -129,6 +160,7 @@ npm run build
 
 node dist/src/cli.js from-json person.schema.json -o person.plaintype
 node dist/src/cli.js from-json person.schema.json --style conversational
+node dist/src/cli.js from-json person.schema.json --style plain
 node dist/src/cli.js to-json person.plaintype -o person.schema.json
 node dist/src/cli.js check person.plaintype
 node dist/src/cli.js format person.plaintype
@@ -139,7 +171,8 @@ conversion commands also accept standard input and write to standard output
 when paths are omitted.
 
 `structured` emits `***plaintype 1***` and is the default for `from-json`.
-`conversational` emits `***plaintype 2***`. With no `--style`, `format`
+`conversational` emits `***plaintype 2***`, and `plain` emits `***plaintype 3***`.
+With no `--style`, `format`
 preserves the input document's version; an explicit style converts to that
 style and header.
 

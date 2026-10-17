@@ -18,12 +18,12 @@ const directory = process.argv[2];
 const styleValue = process.argv[3] ?? "structured";
 if (directory === undefined) {
   process.stderr.write(
-    "Usage: npm run verify:suite -- /path/to/JSON-Schema-Test-Suite/tests/draft2020-12 [structured|conversational]\n",
+    "Usage: npm run verify:suite -- /path/to/JSON-Schema-Test-Suite/tests/draft2020-12 [structured|conversational|plain]\n",
   );
   process.exit(2);
 }
-if (styleValue !== "structured" && styleValue !== "conversational") {
-  throw new Error("Style must be 'structured' or 'conversational'");
+if (styleValue !== "structured" && styleValue !== "conversational" && styleValue !== "plain") {
+  throw new Error("Style must be 'structured', 'conversational', or 'plain'");
 }
 const style: RenderStyle = styleValue;
 

@@ -20,7 +20,7 @@ type Phase =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "offline" };
 
-const STORAGE_KEY = "plaintype-studio-state-v1";
+const STORAGE_KEY = "plaintype-studio-state-v3";
 const DEBOUNCE_MS = 450;
 
 function byId<T extends HTMLElement>(id: string, type: new () => T): T {

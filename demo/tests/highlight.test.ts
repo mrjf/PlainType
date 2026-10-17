@@ -22,6 +22,7 @@ test("classifies a version-2 leaf line", () => {
 
 test("classifies headers, directives, unions and exact escapes", () => {
   expect(classes("***plaintype 2***")).toEqual([["***plaintype 2***", "header"]]);
+  expect(classes("***definitions***")).toEqual([["***definitions***", "header"]]);
   expect(classes("  - Additional properties allowed")).toEqual([["-", "bullet"], ["Additional properties allowed", "keyword"]]);
   expect(classes("- Id: An identifier. Exactly one of:").at(-1)).toEqual(["Exactly one of:", "keyword"]);
   expect(classes('- Exact JSON Schema: {"type":"number"}').slice(1)).toEqual([
@@ -33,4 +34,44 @@ test("classifies headers, directives, unions and exact escapes", () => {
 test("a dash inside a quoted constant does not split description and constraint", () => {
   const tokens = classes('  - kind: The kind - "collar - tag".');
   expect(tokens.at(-1)).toEqual(['"collar - tag"', "string"]);
+});
+
+test("classifies version-3 concepts, attributes, annotations, links and comments", () => {
+  expect(classes("- :Animal: A reusable animal record.")).toEqual([
+    ["-", "bullet"],
+    [":Animal:", "concept"],
+    [" A reusable animal record.", "desc"],
+  ]);
+  expect(classes('  - theme (optional) - The theme - one of "a" or "b". Defaults to "a". For example: "b".')).toEqual([
+    ["-", "bullet"],
+    ["theme", "name"],
+    [" (optional)", "qualifier"],
+    ["-", "punct"],
+    [" The theme", "desc"],
+    ["-", "punct"],
+    ["one", "keyword"],
+    ["of", "keyword"],
+    ['"a"', "string"],
+    ["or", "keyword"],
+    ['"b"', "string"],
+    ["Defaults", "keyword"],
+    ["to", "keyword"],
+    ['"a"', "string"],
+    ["For", "keyword"],
+    ["example", "keyword"],
+    ['"b"', "string"],
+  ]);
+  expect(classes("  - pet - A pet - an array of :Animal:.").at(-1)).toEqual([":Animal:", "concept"]);
+  expect(classes("  - css - Rules - a reference to [a.json](a.json).").at(-1)).toEqual(["[a.json](a.json)", "string"]);
+  expect(classes("  > a note")).toEqual([["> a note", "comment"]]);
+});
+
+test("frontmatter lines are metadata", () => {
+  const text = '---\ndescription: "x"\n---\n***plaintype 3***';
+  expect(highlight(text).map((token) => [text.slice(token.start, token.end), token.cls])).toEqual([
+    ["---", "meta"],
+    ['description: "x"', "meta"],
+    ["---", "meta"],
+    ["***plaintype 3***", "header"],
+  ]);
 });

@@ -1,0 +1,14 @@
+---
+description: "Per-user display settings"
+---
+
+***plaintype 3***
+
+***definitions***
+
+> Shared by the web and desktop clients.
+- :DisplaySettings: How the app is displayed for one user.
+  - theme - The color theme - one of "light", "dark", or "system". Defaults to "system". For example: "dark".
+  - fontSize - The body font size in points - an integer between 8 and 72. Defaults to 14.
+  - displayName (optional) - The name shown in the header - a string between 1 and 40 characters. For example: "Ada" or "Grace Hopper".
+  - stylesheet (optional) - Extra CSS rules - a reference to [styles/custom.schema.json](styles/custom.schema.json).

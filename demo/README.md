@@ -5,7 +5,7 @@ A local demo server with six synced panes:
 | Pane | What it is | Edits |
 | --- | --- | --- |
 | Natural language | A free-form description | Sent to a small Claude model after a short pause |
-| Template | PlainType with `{{slot}}` placeholders | Applied instantly |
+| Template | PlainType version 3 (***plain syntax) with `{{slot}}` placeholders | Applied instantly |
 | Value registry | Slot name → value | Applied instantly to every pane |
 | Raw PlainType | The template with values filled in | Read-only |
 | Formatted PlainType | Canonical `formatPlainType` output, syntax highlighted | Read-only |
@@ -72,6 +72,6 @@ natural-language document also gets filo's `word` tier. Caret hit-testing in
 the natural-language pane uses `annotationsAt`, and the registry shows each
 slot's byte range.
 
-The system prompt is built at boot from `docs/language.md` (the version-2
-section) and the example files, so the model always sees the grammar as it
-ships. It is marked for prompt caching.
+The system prompt is built at boot from `docs/language.md` (the version-2 and
+version-3 sections) and the version-3 example files, so the model always sees
+the grammar as it ships. It is marked for prompt caching.

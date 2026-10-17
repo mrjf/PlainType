@@ -224,6 +224,8 @@ body.has-active mark.slot:not(.active) { opacity: 0.45; }
 .t-string { color: var(--t-string); }
 .t-number { color: var(--t-number); }
 .t-json { color: var(--t-json); }
+.t-concept { color: var(--t-type); font-weight: 650; }
+.t-meta { color: var(--t-comment); }
 .error-line { display: block; color: var(--err); margin-bottom: 8px; font-family: var(--sans); }
 
 /* Registry */

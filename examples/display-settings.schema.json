@@ -1,0 +1,33 @@
+{
+  "title": "DisplaySettings",
+  "type": "object",
+  "description": "How the app is displayed for one user.",
+  "properties": {
+    "theme": {
+      "description": "The color theme",
+      "enum": ["light", "dark", "system"],
+      "default": "system",
+      "examples": ["dark"]
+    },
+    "fontSize": {
+      "description": "The body font size in points",
+      "type": "integer",
+      "minimum": 8,
+      "maximum": 72,
+      "default": 14
+    },
+    "displayName": {
+      "description": "The name shown in the header",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40,
+      "examples": ["Ada", "Grace Hopper"]
+    },
+    "stylesheet": {
+      "description": "Extra CSS rules",
+      "$ref": "styles/custom.schema.json"
+    }
+  },
+  "required": ["theme", "fontSize"],
+  "additionalProperties": false
+}

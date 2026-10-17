@@ -1,8 +1,14 @@
 # PlainType language contract
 
-PlainType has two versioned, deterministic surface grammars over the same
+PlainType has three versioned, deterministic surface grammars over the same
 lossless JSON abstract syntax tree. The header selects the parser; it is not a
 comment or an advisory version number.
+
+| Header | Style name | Grammar |
+| --- | --- | --- |
+| `***plaintype 1***` | `structured` | Complete keyword-by-keyword clauses |
+| `***plaintype 2***` | `conversational` | Compact object, property, and union declarations |
+| `***plaintype 3***` | `plain` | The version-2 model written in [***plain](https://plainlang.org/docs/language-guide/basic-syntax) syntax |
 
 ## Version 1: structured grammar
 
@@ -224,7 +230,7 @@ The API and CLI use style names to select the surface version:
   structured and version 2 remains conversational.
 - An explicit format style converts to that style and its corresponding header.
 
-Both headers are always accepted by `to-json`, `check`, and the public parser.
+Every header is always accepted by `to-json`, `check`, and the public parser.
 
 ### Object declarations
 
@@ -423,3 +429,110 @@ and its fixed-order
 the recursive pair
 [`animal-family.conversational.plaintype`](../examples/animal-family.conversational.plaintype)
 and [`animal-family.schema.json`](../examples/animal-family.schema.json).
+
+## Version 3: ***plain-aligned grammar
+
+Version 3 carries exactly the version-2 declaration model, but spells it with
+the conventions of the [***plain](https://plainlang.org/docs/language-guide/basic-syntax)
+specification language, so a PlainType file reads like a ***plain
+`***definitions***` section. It adds two annotation sentences, for `default` and
+`examples`.
+
+```plain
+---
+description: "Per-user display settings"
+---
+
+***plaintype 3***
+
+***definitions***
+
+> Shared by the web and desktop clients.
+- :DisplaySettings: How the app is displayed for one user.
+  - theme - The color theme - one of "light", "dark", or "system". Defaults to "system". For example: "dark".
+  - fontSize - The body font size in points - an integer between 8 and 72. Defaults to 14.
+  - displayName (optional) - The name shown in the header - a string between 1 and 40 characters. For example: "Ada" or "Grace Hopper".
+  - stylesheet (optional) - Extra CSS rules - a reference to [styles/custom.schema.json](styles/custom.schema.json).
+```
+
+### What comes from ***plain
+
+| ***plain convention | Version 3 |
+| --- | --- |
+| Optional YAML frontmatter between `---` fences, first in the file | Accepted before the header. It is module metadata: the compiler ignores it, and `format` reproduces it verbatim when the output style is `plain`. Other styles have nowhere to keep it and drop it. |
+| `***section***` headers | Declarations live in exactly one `***definitions***` section after the header. Any other section is an error, because a PlainType module only defines data. |
+| Concepts written `:ConceptName:` using letters, digits, `+`, `-`, `.`, and `_` | Every named schema (the root, union alternatives, and definitions) is a concept: `- :Animal: A reusable animal record.` References name the concept: `an :Animal:`, `an array of :Animal:`. |
+| Definitions start with the concept name; attributes are nested `Name - description` bullets | Properties are attributes: `- name - The animal's name - a string containing at least one character.` |
+| Lines starting with `>` are comments | Ignored anywhere after the header, at any indentation. They are not schema data, so `format` does not reproduce them. |
+| Markdown links to files in the module's folder are linked resources | A `$ref` to a relative path inside the folder is written `a reference to [path](path)`. The link text must equal its target. Other references keep `a reference to "URI"`. |
+| Liquid templates expand textually before interpretation | PlainType parses the expanded text. `{{ variable }}` placeholders, as used by the demo's templates, must be filled in before compiling. |
+
+### Document shape
+
+The header comes first, after any frontmatter, followed by the
+`***definitions***` section. Its first bullet is the root schema. When the root
+is a named object, the following bullets are its reusable `$defs`, in order:
+
+```plain
+***plaintype 3***
+
+***definitions***
+
+- :AnimalFamily: A family tree for an animal.
+  - animal - The animal represented here - an :Animal:.
+  - parents (optional) - Its known parents - an array of :Animal:.
+  - offspring (optional) - Its known offspring - an array of :AnimalFamily:.
+
+- :Animal: A reusable animal record.
+  - name - The animal's name - a string containing at least one character.
+```
+
+That document expands in the version-2 fixed member order. `$defs` is placed
+after `required` and before `additionalProperties`, so the root's
+additional-properties directive stays the root's last child, above the
+definitions. A union root, a boolean marker, and `Exact JSON Schema:` cannot be
+followed by definitions.
+
+Concept names follow ***plain's character set. A `title` or `$defs` key outside
+it is still transported losslessly through `Exact JSON Schema:`. Property names
+keep the version-2 rule: safe names are bare, and every other name is a JSON
+string such as `"display name"`. The only declaration qualifier is
+`(optional)`.
+
+### Attributes
+
+A property is `name - description - constraint.`. A property without a
+constraint is a nested object whose attributes follow at the next indentation.
+The first ` - ` after the name separates it from the description, and the last
+unquoted ` - ` separates the description from the constraint. The constraint
+vocabulary is exactly version 2's, with concept tokens in references.
+
+### Defaults and examples
+
+A leaf may end with up to two annotation sentences, in this order:
+
+```plain
+  - theme - The color theme - one of "light" or "dark". Defaults to "light". For example: "dark".
+```
+
+| Sentence | JSON Schema member, after the constraint members |
+| --- | --- |
+| `Defaults to <JSON>.` | `default` |
+| `For example: <JSON list>.` | `examples`, a nonempty array |
+
+Values are strict JSON. An example list uses the same separators as inline
+enums: `"a"`, `"a" or "b"`, `"a", "b", or "c"`. Unlike enums, any JSON values
+are allowed, including objects, arrays, and repeats. A leaf whose `default` and
+`examples` appear in another order, or whose `examples` array is empty, uses
+the exact escape.
+
+### Version-3 round trips
+
+The lossless law and canonical formatting apply unchanged:
+
+```text
+parseJson(toJsonSchema(fromJsonSchema(J, "plain"))) = parseJson(J)
+format(format(PlainType, "plain"), "plain") = format(PlainType, "plain")
+```
+
+`format` converts between versions 2 and 3 without changing the JSON Schema.

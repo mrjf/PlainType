@@ -24,6 +24,11 @@ import {
 
 const HEADER_V1 = "***plaintype 1***";
 const HEADER_V2 = "***plaintype 2***";
+const HEADER_V3 = "***plaintype 3***";
+const V3_DEFINITIONS_SECTION = "***definitions***";
+const V3_DEFAULT_LEAD = ". Defaults to ";
+const V3_EXAMPLES_LEAD = ". For example: ";
+const FRONTMATTER_FENCE = "---";
 const ALLOW_ALL = "Every instance is accepted.";
 const DENY_ALL = "No instance is accepted.";
 const EMPTY_SCHEMA = "No constraints or annotations are specified.";
@@ -37,9 +42,11 @@ const V2_ADDITIONAL_UNSPECIFIED = "Additional properties unspecified";
 const V2_DEFINITIONS = "Definitions:";
 const V2_UNION_SUFFIX = " Exactly one of:";
 
-type PlainTypeVersion = 1 | 2;
+type PlainTypeVersion = 1 | 2 | 3;
+/** The two grammars that share the compact declaration model. */
+type ConversationalVersion = 2 | 3;
 
-export type RenderStyle = "structured" | "conversational";
+export type RenderStyle = "structured" | "conversational" | "plain";
 
 export interface FromJsonOptions {
   /**
@@ -49,7 +56,8 @@ export interface FromJsonOptions {
   readonly defaultDialect?: string | null;
   /**
    * Canonical surface form. `structured` uses the v1 grammar and is the
-   * default; `conversational` uses the compact v2 grammar.
+   * default; `conversational` uses the compact v2 grammar; `plain` uses the
+   * v3 grammar, which follows ***plain's concept and section syntax.
    */
   readonly style?: RenderStyle;
 }
@@ -100,10 +108,18 @@ export function fromJsonSchema(json: string, options: FromJsonOptions = {}): str
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
   const style = options.style ?? "structured";
-  const lines = style === "conversational"
-    ? [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect)]
-    : [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
-  return `${lines.join("\n")}\n`;
+  return `${renderDocumentLines(schema, dialect, style).join("\n")}\n`;
+}
+
+function renderDocumentLines(schema: JsonNode, dialect: string | null, style: RenderStyle): string[] {
+  switch (style) {
+    case "plain":
+      return [HEADER_V3, "", V3_DEFINITIONS_SECTION, "", ...renderSchemaV2(schema, 0, dialect, 3)];
+    case "conversational":
+      return [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect, 2)];
+    case "structured":
+      return [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
+  }
 }
 
 /** Convert PlainType into canonical JSON Schema JSON. */
@@ -118,32 +134,107 @@ export function parsePlainType(source: string): JsonNode {
   return parsePlainTypeDocument(source).schema;
 }
 
-function parsePlainTypeDocument(source: string): { version: PlainTypeVersion; schema: JsonNode } {
+interface ParsedDocument {
+  readonly version: PlainTypeVersion;
+  readonly schema: JsonNode;
+  /** The verbatim YAML frontmatter block, fences included (version 3 only). */
+  readonly frontmatter: string | null;
+}
+
+function parsePlainTypeDocument(source: string): ParsedDocument {
   const normalized = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const lines = normalized.split("\n");
-  let headerIndex = 0;
-  while (headerIndex < lines.length && lines[headerIndex]?.trim() === "") {
-    if (lines[headerIndex]?.includes("\t")) {
-      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", headerIndex + 1);
-    }
-    headerIndex += 1;
+  let headerIndex = skipBlankLines(lines, 0);
+
+  // ***plain modules may open with YAML frontmatter. It is module metadata, not
+  // schema data, so it is carried through formatting but never compiled.
+  let frontmatter: string | null = null;
+  const frontmatterLine = headerIndex + 1;
+  if (lines[headerIndex] === FRONTMATTER_FENCE) {
+    const close = lines.indexOf(FRONTMATTER_FENCE, headerIndex + 1);
+    if (close < 0) throw new PlainTypeSyntaxError("Unclosed YAML frontmatter", frontmatterLine);
+    frontmatter = lines.slice(headerIndex, close + 1).join("\n");
+    headerIndex = skipBlankLines(lines, close + 1);
   }
+
   const header = lines[headerIndex];
   const version: PlainTypeVersion = header === HEADER_V1
     ? 1
     : header === HEADER_V2
       ? 2
-      : (() => {
-          throw new PlainTypeSyntaxError(`Expected ${HEADER_V1} or ${HEADER_V2}`, headerIndex + 1);
-        })();
+      : header === HEADER_V3
+        ? 3
+        : (() => {
+            throw new PlainTypeSyntaxError(`Expected ${HEADER_V1}, ${HEADER_V2}, or ${HEADER_V3}`, headerIndex + 1);
+          })();
+  if (frontmatter !== null && version !== 3) {
+    throw new PlainTypeSyntaxError(`YAML frontmatter requires ${HEADER_V3}`, frontmatterLine);
+  }
 
-  const bullets = parseBullets(lines, headerIndex + 1);
+  const bodyLines = version === 3 ? stripV3SectionsAndComments(lines, headerIndex + 1) : lines;
+  const bullets = parseBullets(bodyLines, headerIndex + 1);
   if (bullets.length === 0) {
     throw new PlainTypeSyntaxError("Expected at least one schema clause", headerIndex + 2);
   }
-  const schema = version === 2 ? schemaFromV2Bullets(bullets) : schemaFromBullets(bullets);
-  return { version, schema };
+  const schema = version === 3
+    ? schemaFromV3Bullets(bullets)
+    : version === 2
+      ? schemaFromV2Bullets(bullets)
+      : schemaFromBullets(bullets);
+  return { version, schema, frontmatter };
 }
+
+function skipBlankLines(lines: readonly string[], start: number): number {
+  let index = start;
+  while (index < lines.length && lines[index]?.trim() === "") {
+    if (lines[index]?.includes("\t")) {
+      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", index + 1);
+    }
+    index += 1;
+  }
+  return index;
+}
+
+/**
+ * Version 3 follows ***plain's file layout: `>` lines are comments, and the
+ * declarations live in the one `***definitions***` section. Both are blanked
+ * here (keeping line numbers) so the shared bullet parser sees only clauses.
+ */
+function stripV3SectionsAndComments(lines: readonly string[], start: number): string[] {
+  const result = [...lines];
+  let sawSection = false;
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (/^ *>/.test(line)) {
+      result[index] = "";
+      continue;
+    }
+    const section = /^\*\*\*([^*]+)\*\*\*$/.exec(line);
+    if (section !== null) {
+      if (line !== V3_DEFINITIONS_SECTION) {
+        throw new PlainTypeSyntaxError(
+          `A PlainType module contains only ${V3_DEFINITIONS_SECTION}; found ***${section[1] ?? ""}***`,
+          index + 1,
+        );
+      }
+      if (sawSection) throw new PlainTypeSyntaxError(`Duplicate ${V3_DEFINITIONS_SECTION} section`, index + 1);
+      sawSection = true;
+      result[index] = "";
+      continue;
+    }
+    if (!sawSection && line.trim() !== "") {
+      throw new PlainTypeSyntaxError(`Expected ${V3_DEFINITIONS_SECTION} before the first definition`, index + 1);
+    }
+  }
+  if (!sawSection) throw new PlainTypeSyntaxError(`Expected a ${V3_DEFINITIONS_SECTION} section`, start + 1);
+  return result;
+}
+
+const STYLE_FOR_VERSION: Readonly<Record<PlainTypeVersion, RenderStyle>> = {
+  1: "structured",
+  2: "conversational",
+  3: "plain",
+};
 
 /** Canonicalize an already-authored PlainType document. */
 export function formatPlainType(source: string, options: FromJsonOptions = {}): string {
@@ -151,11 +242,11 @@ export function formatPlainType(source: string, options: FromJsonOptions = {}): 
   const schema = parsed.schema;
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
-  const style = options.style ?? (parsed.version === 2 ? "conversational" : "structured");
-  const lines = style === "conversational"
-    ? [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect)]
-    : [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
-  return `${lines.join("\n")}\n`;
+  const style = options.style ?? STYLE_FOR_VERSION[parsed.version];
+  const lines = renderDocumentLines(schema, dialect, style);
+  // Frontmatter is v3 module metadata; other grammars have nowhere to keep it.
+  const frontmatter = style === "plain" && parsed.frontmatter !== null ? [parsed.frontmatter, ""] : [];
+  return `${[...frontmatter, ...lines].join("\n")}\n`;
 }
 
 function renderSchema(
@@ -529,6 +620,8 @@ interface V2ObjectPlan {
 interface V2LeafPlan {
   readonly description: string;
   readonly constraint: string;
+  /** Version 3 only: trailing ` Defaults to …. For example: ….` sentences. */
+  readonly annotations: string;
 }
 
 interface V2UnionPlan {
@@ -554,6 +647,7 @@ function renderSchemaV2(
   node: JsonNode,
   depth: number,
   inheritedDialect: string | null,
+  version: ConversationalVersion,
 ): string[] {
   if (node.type === "boolean") {
     return [`${indent(depth)}- ${node.value ? ALLOW_ALL : DENY_ALL}`];
@@ -563,10 +657,10 @@ function renderSchemaV2(
   const context = v2ReferenceContextFromSchema(node);
   if (context === null) return renderV2ExactSchema(node, depth);
   if (dialect === DRAFT_2020_12) {
-    const union = v2UnionPlan(node);
-    if (union !== null) return renderV2Union(union, depth, dialect, context);
-    const object = v2ObjectPlan(node, true, context, true);
-    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context);
+    const union = v2UnionPlan(node, version);
+    if (union !== null) return renderV2Union(union, depth, dialect, context, version);
+    const object = v2ObjectPlan(node, true, context, true, version);
+    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
   }
   return renderV2ExactSchema(node, depth);
 }
@@ -576,12 +670,13 @@ function renderV2SchemaAlternative(
   depth: number,
   dialect: string | null,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
   if (node.type === "object" && dialect === DRAFT_2020_12) {
-    const union = v2UnionPlan(node);
-    if (union !== null) return renderV2Union(union, depth, dialect, context);
-    const object = v2ObjectPlan(node, true, context, false);
-    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context);
+    const union = v2UnionPlan(node, version);
+    if (union !== null) return renderV2Union(union, depth, dialect, context, version);
+    const object = v2ObjectPlan(node, true, context, false, version);
+    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
   }
   return renderV2ExactSchema(node, depth);
 }
@@ -595,12 +690,14 @@ function v2ObjectPlan(
   named: boolean,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
 ): V2ObjectPlan | null {
   let index = 0;
   let name: string | null = null;
   if (named) {
     const title = node.entries[index];
     if (title?.key !== "title" || title.value.type !== "string") return null;
+    if (version === 3 && !isConceptName(title.value.value)) return null;
     name = title.value.value;
     index += 1;
   }
@@ -656,7 +753,8 @@ function v2ObjectPlan(
       !allowDefinitions ||
       definitionsEntry.value.type !== "object" ||
       !schemaMapContainsOnlySchemas(definitionsEntry.value) ||
-      new Set(definitionsEntry.value.entries.map(({ key }) => key)).size !== definitionsEntry.value.entries.length
+      new Set(definitionsEntry.value.entries.map(({ key }) => key)).size !== definitionsEntry.value.entries.length ||
+      (version === 3 && !definitionsEntry.value.entries.every(({ key }) => isConceptName(key)))
     ) {
       return null;
     }
@@ -674,9 +772,9 @@ function v2ObjectPlan(
   if (index !== node.entries.length) return null;
 
   for (const property of properties.value.entries) {
-    if (v2LeafPlan(property.value, context) === null) {
+    if (v2LeafPlan(property.value, context, version) === null) {
       if (property.value.type !== "object") return null;
-      const nestedPlan = v2ObjectPlan(property.value, false, context, false);
+      const nestedPlan = v2ObjectPlan(property.value, false, context, false, version);
       if (nestedPlan === null || v2ObjectDescriptionLooksLikeLeaf(nestedPlan)) return null;
     }
   }
@@ -685,7 +783,7 @@ function v2ObjectPlan(
     for (const definition of definitions.entries) {
       if (
         definition.value.type !== "object" ||
-        v2ObjectPlan(definition.value, false, context, false) === null
+        v2ObjectPlan(definition.value, false, context, false, version) === null
       ) {
         return null;
       }
@@ -707,7 +805,7 @@ function v2ObjectDescriptionLooksLikeLeaf(plan: V2ObjectPlan): boolean {
     lastUnquotedSeparator(plan.description, " - ") >= 0;
 }
 
-function v2LeafPlan(node: JsonNode, context: V2ReferenceContext): V2LeafPlan | null {
+function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: ConversationalVersion): V2LeafPlan | null {
   if (node.type !== "object") return null;
   const description = node.entries[0];
   if (
@@ -718,17 +816,33 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext): V2LeafPlan | n
   ) {
     return null;
   }
-  const constraint = renderV2Constraint(node.entries.slice(1), context);
+  let rest = node.entries.slice(1);
+  let annotations = "";
+  if (version === 3) {
+    // Fixed order after the constraint members: `default`, then `examples`.
+    const examples = rest.at(-1);
+    if (examples?.key === "examples" && examples.value.type === "array" && examples.value.items.length > 0) {
+      annotations = `${V3_EXAMPLES_LEAD}${joinNaturalList(examples.value.items.map((item) => stringifyJson(item)))}`;
+      rest = rest.slice(0, -1);
+    }
+    const fallback = rest.at(-1);
+    if (fallback?.key === "default") {
+      annotations = `${V3_DEFAULT_LEAD}${stringifyJson(fallback.value)}${annotations}`;
+      rest = rest.slice(0, -1);
+    }
+  }
+  const constraint = renderV2Constraint(rest, context, version);
   return constraint === null
     ? null
-    : { description: description.value.value, constraint };
+    : { description: description.value.value, constraint, annotations };
 }
 
-function v2UnionPlan(node: JsonObject): V2UnionPlan | null {
+function v2UnionPlan(node: JsonObject, version: ConversationalVersion): V2UnionPlan | null {
   if (node.entries.length !== 3) return null;
   const [title, description, oneOf] = node.entries;
   if (
     title?.key !== "title" || title.value.type !== "string" ||
+    (version === 3 && !isConceptName(title.value.value)) ||
     description?.key !== "description" || description.value.type !== "string" ||
     description.value.value === "" || !isSafeV2InlineDescription(description.value.value) ||
     oneOf?.key !== "oneOf" || oneOf.value.type !== "array" || oneOf.value.items.length === 0 ||
@@ -748,12 +862,12 @@ function renderV2Union(
   depth: number,
   dialect: string | null,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
-  const lines = [
-    `${indent(depth)}- ${renderPropertyName(plan.name)}: ${plan.description}${V2_UNION_SUFFIX}`,
-  ];
+  const head = version === 3 ? `${conceptToken(plan.name)} ` : `${renderPropertyName(plan.name)}: `;
+  const lines = [`${indent(depth)}- ${head}${plan.description}${V2_UNION_SUFFIX}`];
   for (const alternative of plan.alternatives) {
-    lines.push(...renderV2SchemaAlternative(alternative, depth + 1, dialect, context));
+    lines.push(...renderV2SchemaAlternative(alternative, depth + 1, dialect, context, version));
   }
   return lines;
 }
@@ -765,15 +879,22 @@ function renderV2Object(
   optional: boolean,
   propertyContext: boolean,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
   const marker = propertyContext && optional ? " (optional)" : "";
-  const name = plan.name === null ? "" : renderPropertyName(plan.name);
-  const lines = [`${indent(depth)}- ${name}${marker}: ${plan.description}`];
+  const name = plan.name === null ? "" : plan.name;
+  // v3 names schemas as ***plain concepts and properties as `Name - description` attributes.
+  const head = version === 2
+    ? `${renderPropertyName(name)}${marker}: `
+    : propertyContext
+      ? `${renderPropertyName(name)}${marker} - `
+      : `${conceptToken(name)} `;
+  const lines = [`${indent(depth)}- ${head}${plan.description}`];
   const required = new Set(plan.requiredNames);
   for (const property of plan.properties.entries) {
     const propertyOptional = !required.has(property.key);
     const nestedObject = property.value.type === "object"
-      ? v2ObjectPlan(property.value, false, context, false)
+      ? v2ObjectPlan(property.value, false, context, false, version)
       : null;
     if (nestedObject !== null) {
       lines.push(...renderV2Object(
@@ -783,33 +904,43 @@ function renderV2Object(
         propertyOptional,
         true,
         context,
+        version,
       ));
       continue;
     }
-    const leaf = v2LeafPlan(property.value, context);
+    const leaf = v2LeafPlan(property.value, context, version);
     if (leaf === null) throw new TypeError("A planned v2 property became unrenderable");
     const optionalMarker = propertyOptional ? " (optional)" : "";
+    const separator = version === 2 ? ":" : " -";
     lines.push(
-      `${indent(depth + 1)}- ${renderPropertyName(property.key)}${optionalMarker}: ${leaf.description} - ${leaf.constraint}.`,
+      `${indent(depth + 1)}- ${renderPropertyName(property.key)}${optionalMarker}${separator} ${leaf.description} - ${leaf.constraint}${leaf.annotations}.`,
     );
   }
+  const definitionLines: string[] = [];
   if (plan.definitions !== null) {
-    lines.push("");
-    lines.push(`${indent(depth + 1)}- ${V2_DEFINITIONS}`);
+    // v2 nests definitions under the root; v3 lists them beside it in ***definitions***.
+    const definitionDepth = version === 2 ? depth + 2 : depth;
+    if (version === 2) {
+      lines.push("");
+      lines.push(`${indent(depth + 1)}- ${V2_DEFINITIONS}`);
+    }
     for (const definition of plan.definitions.entries) {
       if (definition.value.type !== "object") {
         throw new TypeError("A planned v2 definition became unrenderable");
       }
-      const definitionPlan = v2ObjectPlan(definition.value, false, context, false);
+      const definitionPlan = v2ObjectPlan(definition.value, false, context, false, version);
       if (definitionPlan === null) throw new TypeError("A planned v2 definition became unrenderable");
-      lines.push(...renderV2Object(
+      const rendered = renderV2Object(
         { ...definitionPlan, name: definition.key },
-        depth + 2,
+        definitionDepth,
         dialect,
         false,
         false,
         context,
-      ));
+        version,
+      );
+      if (version === 2) lines.push(...rendered);
+      else definitionLines.push("", ...rendered);
     }
   }
   if (plan.additionalMode === "allowed") {
@@ -817,15 +948,16 @@ function renderV2Object(
   } else if (plan.additionalMode === "unspecified") {
     lines.push(`${indent(depth + 1)}- ${V2_ADDITIONAL_UNSPECIFIED}`);
   }
-  return lines;
+  return [...lines, ...definitionLines];
 }
 
 function renderV2Constraint(
   entries: readonly JsonObjectEntry[],
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string | null {
   if (entries.length === 1 && entries[0]?.key === "$ref" && entries[0].value.type === "string") {
-    return renderV2Reference(entries[0].value.value, context);
+    return renderV2Reference(entries[0].value.value, context, version);
   }
   if (
     entries.length === 2 &&
@@ -834,8 +966,9 @@ function renderV2Constraint(
     entries[1].value.entries.length === 1 &&
     entries[1].value.entries[0]?.key === "$ref" && entries[1].value.entries[0].value.type === "string"
   ) {
-    const name = renderV2ReferenceName(entries[1].value.entries[0].value.value, context);
-    return name === null ? null : `an array of ${name}`;
+    const name = renderV2ReferenceName(entries[1].value.entries[0].value.value, context, version);
+    if (name === null) return null;
+    return `an array of ${version === 3 ? conceptToken(name) : name}`;
   }
   if (entries.length === 1 && entries[0]?.key === "const") {
     return stringifyJson(entries[0].value);
@@ -928,26 +1061,49 @@ function renderV2Constraint(
   return null;
 }
 
-function renderV2Reference(reference: string, context: V2ReferenceContext): string {
-  const name = renderV2ReferenceName(reference, context);
-  return name === null
-    ? `a reference to ${jsonString(reference)}`
-    : `${v2IndefiniteArticle(name)} ${name}`;
+function renderV2Reference(reference: string, context: V2ReferenceContext, version: ConversationalVersion): string {
+  const name = renderV2ReferenceName(reference, context, version);
+  if (name !== null) {
+    return `${v2IndefiniteArticle(name)} ${version === 3 ? conceptToken(name) : name}`;
+  }
+  // v3 writes a local file reference as a ***plain linked resource.
+  if (version === 3 && isLinkableReference(reference)) return `a reference to [${reference}](${reference})`;
+  return `a reference to ${jsonString(reference)}`;
 }
 
-function renderV2ReferenceName(reference: string, context: V2ReferenceContext): string | null {
+function renderV2ReferenceName(
+  reference: string,
+  context: V2ReferenceContext,
+  version: ConversationalVersion,
+): string | null {
+  const safe = version === 3 ? isConceptName : isSafeV2SchemaName;
   if (
     reference === "#" &&
     context.rootName !== null &&
-    isSafeV2SchemaName(context.rootName)
+    safe(context.rootName)
   ) {
     return context.rootName;
   }
   const prefix = "#/$defs/";
   if (!reference.startsWith(prefix)) return null;
   const token = reference.slice(prefix.length);
-  if (!isSafeV2SchemaName(token) || !context.definitionNames.has(token)) return null;
+  if (!safe(token) || !context.definitionNames.has(token)) return null;
   return token;
+}
+
+/** ***plain concept names: letters, digits, `+`, `-`, `.`, and `_`. */
+function isConceptName(name: string): boolean {
+  return /^[A-Za-z0-9+._-]+$/.test(name);
+}
+
+function conceptToken(name: string): string {
+  return `:${name}:`;
+}
+
+/** A relative path inside the module's folder, which ***plain can attach as a linked resource. */
+function isLinkableReference(reference: string): boolean {
+  return /^(?![A-Za-z][A-Za-z0-9+.-]*:)(?!\/)[A-Za-z0-9._~\/-]+$/.test(reference) &&
+    !reference.split("/").includes("..");
 }
 
 function v2IndefiniteArticle(name: string): "a" | "an" {
@@ -1009,7 +1165,51 @@ function schemaFromV2Bullets(bullets: readonly Bullet[]): JsonNode {
   const bullet = bullets[0];
   if (bullet === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
   const context = v2ReferenceContextFromBullet(bullet);
-  return schemaFromV2Bullet(bullet, context, true);
+  return schemaFromV2Bullet(bullet, context, true, 2);
+}
+
+/**
+ * Version 3: the `***definitions***` list holds the root schema first and its
+ * reusable `$defs` after it, each written as a ***plain concept definition.
+ */
+function schemaFromV3Bullets(bullets: readonly Bullet[]): JsonNode {
+  const [root, ...definitions] = bullets;
+  if (root === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
+  const context = v3ReferenceContextFromBullets(root, definitions);
+  if (isV2MarkerClause(root.text)) {
+    if (definitions[0] !== undefined) {
+      throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
+    }
+    return schemaFromV2Bullet(root, context, false, 3);
+  }
+  const declaration = parseV3ConceptDeclaration(root.text, root.line);
+  if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
+    if (definitions[0] !== undefined) {
+      throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
+    }
+    return schemaFromV2Bullet(root, context, false, 3);
+  }
+  return schemaFromV2Object(declaration, root, true, context, false, 3, definitions);
+}
+
+function isV2MarkerClause(text: string): boolean {
+  return text === ALLOW_ALL || text === DENY_ALL || text.startsWith(`${V2_EXACT_SCHEMA_LEAD} `);
+}
+
+function v3ReferenceContextFromBullets(root: Bullet, definitions: readonly Bullet[]): V2ReferenceContext {
+  const rootName = isV2MarkerClause(root.text) ? null : parseV3ConceptDeclaration(root.text, root.line).name;
+  const definitionNames = new Set<string>();
+  for (const definitionBullet of definitions) {
+    const definition = parseV3ConceptDeclaration(definitionBullet.text, definitionBullet.line);
+    if (definitionNames.has(definition.name)) {
+      throw new PlainTypeSyntaxError(`Duplicate definition ${conceptToken(definition.name)}`, definitionBullet.line);
+    }
+    if (definition.name === rootName) {
+      throw new PlainTypeSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
+    }
+    definitionNames.add(definition.name);
+  }
+  return { rootName, definitionNames };
 }
 
 function v2ReferenceContextFromBullet(bullet: Bullet): V2ReferenceContext {
@@ -1043,6 +1243,7 @@ function schemaFromV2Bullet(
   bullet: Bullet,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
 ): JsonNode {
   if (bullet.text === ALLOW_ALL || bullet.text === DENY_ALL) {
     requireNoChildren(bullet);
@@ -1058,13 +1259,15 @@ function schemaFromV2Bullet(
     return schema;
   }
 
-  const declaration = parseV2Declaration(bullet.text, bullet.line);
+  const declaration = version === 3
+    ? parseV3ConceptDeclaration(bullet.text, bullet.line)
+    : parseV2Declaration(bullet.text, bullet.line);
   if (declaration.optional) {
     throw new PlainTypeSyntaxError("A root schema or alternative cannot be optional", bullet.line);
   }
 
   if (!declaration.body.endsWith(V2_UNION_SUFFIX)) {
-    return schemaFromV2Object(declaration, bullet, true, context, allowDefinitions);
+    return schemaFromV2Object(declaration, bullet, true, context, allowDefinitions, version);
   }
   const description = declaration.body.slice(0, -V2_UNION_SUFFIX.length);
   if (description === "" || !isSafeV2InlineDescription(description)) {
@@ -1078,7 +1281,7 @@ function schemaFromV2Bullet(
     { key: "description", value: { type: "string", value: description } },
     {
       key: "oneOf",
-      value: arrayNode(bullet.children.map((child) => schemaFromV2Bullet(child, context, false))),
+      value: arrayNode(bullet.children.map((child) => schemaFromV2Bullet(child, context, false, version))),
     },
   ]);
 }
@@ -1089,6 +1292,9 @@ function schemaFromV2Object(
   named: boolean,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
+  /** Version 3: the root's sibling definitions from the ***definitions*** list. */
+  siblingDefinitions: readonly Bullet[] = [],
 ): JsonObject {
   if (declaration.body === "" || !isSafeV2InlineDescription(declaration.body)) {
     throw new PlainTypeSyntaxError("An object declaration needs a safe inline description", bullet.line);
@@ -1114,7 +1320,7 @@ function schemaFromV2Object(
       continue;
     }
 
-    if (child.text === V2_DEFINITIONS) {
+    if (version === 2 && child.text === V2_DEFINITIONS) {
       if (!allowDefinitions) {
         throw new PlainTypeSyntaxError("Definitions are supported only on the root object", child.line);
       }
@@ -1139,7 +1345,7 @@ function schemaFromV2Object(
         }
         entries.push({
           key: definition.name,
-          value: schemaFromV2Object(definition, definitionBullet, false, context, false),
+          value: schemaFromV2Object(definition, definitionBullet, false, context, false, version),
         });
       }
       definitions = objectNode(entries);
@@ -1150,12 +1356,27 @@ function schemaFromV2Object(
       throw new PlainTypeSyntaxError("Only the additional-properties directive may follow Definitions", child.line);
     }
 
-    const parsed = propertyFromV2Bullet(child, context);
+    const parsed = propertyFromV2Bullet(child, context, version);
     if (properties.some(({ key }) => key === parsed.name)) {
       throw new PlainTypeSyntaxError(`Duplicate compact property ${jsonString(parsed.name)} is ambiguous`, child.line);
     }
     properties.push({ key: parsed.name, value: parsed.schema });
     if (!parsed.optional) required.push({ type: "string", value: parsed.name });
+  }
+
+  if (siblingDefinitions.length > 0) {
+    const entries: JsonObjectEntry[] = [];
+    for (const definitionBullet of siblingDefinitions) {
+      const definition = parseV3ConceptDeclaration(definitionBullet.text, definitionBullet.line);
+      if (definition.body.endsWith(V2_UNION_SUFFIX)) {
+        throw new PlainTypeSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
+      }
+      entries.push({
+        key: definition.name,
+        value: schemaFromV2Object(definition, definitionBullet, false, context, false, version),
+      });
+    }
+    definitions = objectNode(entries);
   }
 
   return objectNode([
@@ -1176,8 +1397,11 @@ function schemaFromV2Object(
 function propertyFromV2Bullet(
   bullet: Bullet,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): { name: string; optional: boolean; schema: JsonNode } {
-  const declaration = parseV2Declaration(bullet.text, bullet.line);
+  const declaration = version === 3
+    ? parseV3AttributeDeclaration(bullet.text, bullet.line)
+    : parseV2Declaration(bullet.text, bullet.line);
   if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
     throw new PlainTypeSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
   }
@@ -1187,29 +1411,53 @@ function propertyFromV2Bullet(
     return {
       name: declaration.name,
       optional: declaration.optional,
-      schema: schemaFromV2Object(declaration, bullet, false, context, false),
+      schema: schemaFromV2Object(declaration, bullet, false, context, false, version),
     };
   }
   requireNoChildren(bullet);
   const description = declaration.body.slice(0, separator);
-  const constraint = declaration.body.slice(separator + 3, -1);
+  const tail = declaration.body.slice(separator + 3, -1);
   if (description === "" || !isSafeV2InlineDescription(description)) {
     throw new PlainTypeSyntaxError("A property needs a safe inline description", bullet.line);
   }
+  const { constraint, annotations } = version === 3
+    ? splitV3Annotations(tail, bullet.line)
+    : { constraint: tail, annotations: [] };
   return {
     name: declaration.name,
     optional: declaration.optional,
     schema: objectNode([
       { key: "description", value: { type: "string", value: description } },
-      ...entriesFromV2Constraint(constraint, bullet.line, context),
+      ...entriesFromV2Constraint(constraint, bullet.line, context, version),
+      ...annotations,
     ]),
   };
+}
+
+/** Split `constraint. Defaults to X. For example: A or B` into the constraint and annotation members. */
+function splitV3Annotations(source: string, line: number): { constraint: string; annotations: JsonObjectEntry[] } {
+  let constraint = source;
+  let examples: JsonObjectEntry | null = null;
+  const examplesAt = lastUnquotedSeparator(constraint, V3_EXAMPLES_LEAD);
+  if (examplesAt >= 0) {
+    const values = parseJsonNaturalList(constraint.slice(examplesAt + V3_EXAMPLES_LEAD.length), line);
+    examples = { key: "examples", value: arrayNode(values) };
+    constraint = constraint.slice(0, examplesAt);
+  }
+  let fallback: JsonObjectEntry | null = null;
+  const defaultAt = lastUnquotedSeparator(constraint, V3_DEFAULT_LEAD);
+  if (defaultAt >= 0) {
+    fallback = { key: "default", value: parseEmbeddedJson(constraint.slice(defaultAt + V3_DEFAULT_LEAD.length), line) };
+    constraint = constraint.slice(0, defaultAt);
+  }
+  return { constraint, annotations: [...(fallback ? [fallback] : []), ...(examples ? [examples] : [])] };
 }
 
 function entriesFromV2Constraint(
   source: string,
   line: number,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): JsonObjectEntry[] {
   const literal = tryParseEmbeddedJson(source);
   if (literal !== null) return [{ key: "const", value: literal }];
@@ -1250,7 +1498,20 @@ function entriesFromV2Constraint(
     return [{ key: "$ref", value: reference }];
   }
 
-  const arrayReference = nullable ? null : /^an array of ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
+  const linkedReference = nullable || version === 2 ? null : /^a reference to \[([^\]]+)\]\(([^)]+)\)$/.exec(base);
+  if (linkedReference !== null) {
+    const [, text, target] = linkedReference;
+    if (text !== target || target === undefined || !isLinkableReference(target)) {
+      throw new PlainTypeSyntaxError("A linked reference must be a relative file path whose link text equals its target", line);
+    }
+    return [{ key: "$ref", value: { type: "string", value: target } }];
+  }
+
+  const arrayReference = nullable
+    ? null
+    : version === 3
+      ? /^an array of :([A-Za-z0-9+._-]+):$/.exec(base)
+      : /^an array of ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
   if (arrayReference !== null) {
     const reference = v2NamedReference(arrayReference[1] ?? "", line, context);
     return [
@@ -1259,7 +1520,11 @@ function entriesFromV2Constraint(
     ];
   }
 
-  const namedReference = nullable ? null : /^(?:a|an) ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
+  const namedReference = nullable
+    ? null
+    : version === 3
+      ? /^(?:a|an) :([A-Za-z0-9+._-]+):$/.exec(base)
+      : /^(?:a|an) ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
   if (namedReference !== null) {
     const name = namedReference[1] ?? "";
     return [{ key: "$ref", value: { type: "string", value: v2NamedReference(name, line, context) } }];
@@ -1314,13 +1579,67 @@ function entriesFromV2Constraint(
     ];
   }
 
-  throw new PlainTypeSyntaxError(`Unknown version-2 constraint ${JSON.stringify(source)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown version-${version} constraint ${JSON.stringify(source)}`, line);
 }
 
 function v2NamedReference(name: string, line: number, context: V2ReferenceContext): string {
   if (name === context.rootName) return "#";
   if (context.definitionNames.has(name)) return `#/$defs/${name}`;
   throw new PlainTypeSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
+}
+
+/** A comma/"or" list of JSON values, as rendered by `joinNaturalList`. */
+function parseJsonNaturalList(source: string, line: number): JsonNode[] {
+  const values: JsonNode[] = [];
+  let cursor = 0;
+  let finalExpected = false;
+  while (cursor < source.length) {
+    const end = endOfJsonValueToken(source, cursor, line);
+    values.push(parseEmbeddedJson(source.slice(cursor, end), line));
+    cursor = end;
+    if (finalExpected) {
+      if (cursor !== source.length) throw new PlainTypeSyntaxError("The final example must end the sentence", line);
+      finalExpected = false;
+      break;
+    }
+    if (cursor === source.length) break;
+    if (source.startsWith(", or ", cursor)) {
+      cursor += ", or ".length;
+      finalExpected = true;
+    } else if (source.startsWith(" or ", cursor)) {
+      cursor += " or ".length;
+      finalExpected = true;
+    } else if (source.startsWith(", ", cursor)) {
+      cursor += 2;
+    } else {
+      throw new PlainTypeSyntaxError("Expected a comma or 'or' between examples", line);
+    }
+  }
+  if (finalExpected || values.length === 0) throw new PlainTypeSyntaxError("Expected an example value", line);
+  return values;
+}
+
+function endOfJsonValueToken(source: string, start: number, line: number): number {
+  const first = source[start];
+  if (first === '"') return endOfJsonStringToken(source, start, line);
+  if (first === "{" || first === "[") {
+    let depth = 0;
+    for (let index = start; index < source.length; index += 1) {
+      const character = source[index];
+      if (character === '"') {
+        index = endOfJsonStringToken(source, index, line) - 1;
+      } else if (character === "{" || character === "[") {
+        depth += 1;
+      } else if (character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) return index + 1;
+      }
+    }
+    throw new PlainTypeSyntaxError("Unterminated JSON value", line);
+  }
+  const scalar = /^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)/.exec(source.slice(start));
+  if (scalar === null) throw new PlainTypeSyntaxError("Expected a JSON value", line);
+  return start + scalar[0].length;
 }
 
 function v2CountNode(source: string, line: number): Extract<JsonNode, { type: "number" }> {
@@ -1421,6 +1740,36 @@ function parseV2Declaration(source: string, line: number): V2Declaration {
   cursor += 1;
   if (source[cursor] === " ") cursor += 1;
   return { name, optional, object, body: source.slice(cursor) };
+}
+
+/** `:Concept: description` — how v3 names a root, alternative, or definition. */
+function parseV3ConceptDeclaration(source: string, line: number): V2Declaration {
+  const match = /^:([A-Za-z0-9+._-]+):(?: ([\s\S]*))?$/.exec(source);
+  if (match === null) throw new PlainTypeSyntaxError("Expected a :ConceptName: declaration", line);
+  return { name: match[1] ?? "", optional: false, object: false, body: match[2] ?? "" };
+}
+
+/** `name (optional) - description …` — how v3 declares a property, as a ***plain attribute. */
+function parseV3AttributeDeclaration(source: string, line: number): V2Declaration {
+  let nameToken: string;
+  if (source.startsWith('"')) {
+    nameToken = source.slice(0, endOfJsonStringToken(source, 0, line));
+  } else {
+    const match = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(source);
+    if (match === null) throw new PlainTypeSyntaxError("Expected a safe name or JSON string", line);
+    nameToken = match[0];
+  }
+  const name = parsePropertyName(nameToken, line);
+  let cursor = nameToken.length;
+  let optional = false;
+  if (source.startsWith(" (optional)", cursor)) {
+    optional = true;
+    cursor += " (optional)".length;
+  }
+  if (!source.startsWith(" - ", cursor)) {
+    throw new PlainTypeSyntaxError("Expected ' - ' between the attribute name and its description", line);
+  }
+  return { name, optional, object: false, body: source.slice(cursor + 3) };
 }
 
 function endOfJsonStringToken(source: string, start: number, line: number): number {

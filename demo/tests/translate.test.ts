@@ -8,11 +8,13 @@ import type { ModelOutput } from "../src/schemas.js";
 const NATLANG = "A Badge has a caption of at most 12 characters and a green outline.";
 const GOOD: ModelOutput = {
   plaintypeTemplate: [
-    "***plaintype 2***",
+    "***plaintype 3***",
     "",
-    "- {{typeName}}: A small label.",
-    "  - caption: The caption text - a string between 1 and {{captionMax}} characters.",
-    '  - outline: The outline color - "{{outlineColor}}".',
+    "***definitions***",
+    "",
+    "- :{{typeName}}: A small label.",
+    "  - caption - The caption text - a string between 1 and {{captionMax}} characters.",
+    '  - outline - The outline color - "{{outlineColor}}".',
   ].join("\n"),
   slots: [
     { name: "typeName", value: "Badge" },
@@ -45,7 +47,7 @@ describe("reviewOutput", () => {
 
   test("reports bookkeeping, verbatim and compile problems", () => {
     const review = reviewOutput(NATLANG, {
-      plaintypeTemplate: "***plaintype 2***\n\n- {{typeName}}: X.\n  - a: B - a string between 1 and {{max}}.",
+      plaintypeTemplate: "***plaintype 3***\n\n***definitions***\n\n- :{{typeName}}: X.\n  - a - B - a string between 1 and {{max}}.",
       slots: [
         { name: "typeName", value: "Badge" },
         { name: "typeName", value: "Again" },

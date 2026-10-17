@@ -15,7 +15,9 @@ export type TokenClass =
   | "type"
   | "string"
   | "number"
-  | "json";
+  | "json"
+  | "concept"
+  | "meta";
 
 export interface Token {
   readonly start: number;
@@ -37,16 +39,25 @@ const KEYWORDS = new Set([
   "most", "exactly", "one", "containing", "character", "characters", "digits", "date", "in", "format",
   "email", "UUID", "non-negative", "reference", "to", "allowed", "types", "type", "must", "contain",
   "be", "is", "are", "its", "it", "numeric", "instance", "schema", "required",
+  "Defaults", "For", "example", "true", "false",
 ]);
-const INLINE = /"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_-]*/g;
+const CONCEPT = /^:[A-Za-z0-9+._-]+:/;
+const INLINE = /"(?:[^"\\]|\\.)*"|\[[^\]]*\]\([^)]*\)|:[A-Za-z0-9+._-]+:|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_-]*/g;
 const NAME = /^(?:"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)/;
 const QUALIFIER = /^ ?\((?:optional|required|object|optional, object)\)/;
 
 export function highlight(text: string): Token[] {
   const tokens: Token[] = [];
+  const lines = text.split("\n");
+  // Version-3 modules may open with YAML frontmatter between `---` fences.
+  const frontmatterEnd = lines[0] === "---" ? lines.indexOf("---", 1) : -1;
   let lineStart = 0;
-  for (const line of text.split("\n")) {
-    highlightLine(line, lineStart, tokens);
+  for (const [index, line] of lines.entries()) {
+    if (index <= frontmatterEnd) {
+      if (line !== "") tokens.push({ start: lineStart, end: lineStart + line.length, cls: "meta" });
+    } else {
+      highlightLine(line, lineStart, tokens);
+    }
     lineStart += line.length + 1;
   }
   return tokens;
@@ -56,11 +67,11 @@ function highlightLine(line: string, base: number, out: Token[]): void {
   const push = (start: number, end: number, cls: TokenClass): void => {
     if (end > start) out.push({ start: base + start, end: base + end, cls });
   };
-  if (/^\*\*\*plaintype \d+\*\*\*$/.test(line)) return push(0, line.length, "header");
+  if (/^\*\*\*[a-z0-9 ]+\*\*\*$/.test(line)) return push(0, line.length, "header");
 
   const indent = line.length - line.trimStart().length;
   const rest = line.slice(indent);
-  if (rest.startsWith("#")) return push(indent, line.length, "comment");
+  if (rest.startsWith("#") || rest.startsWith(">")) return push(indent, line.length, "comment");
   if (!rest.startsWith("- ")) return inline(line, 0, line.length, push);
 
   push(indent, indent + 1, "bullet");
@@ -76,11 +87,20 @@ function highlightLine(line: string, base: number, out: Token[]): void {
     return push(bodyStart + exact[0].length, line.length, "json");
   }
 
+  // v3 concept declaration: ":Name: description"
+  const concept = CONCEPT.exec(body);
+  if (concept) {
+    push(bodyStart, bodyStart + concept[0].length, "concept");
+    return describe(line, bodyStart + concept[0].length, push);
+  }
+
   const name = NAME.exec(body);
   const afterName = name ? body.slice(name[0].length) : "";
   const qualifier = QUALIFIER.exec(afterName);
   const afterQualifier = qualifier ? afterName.slice(qualifier[0].length) : afterName;
-  if (!name || !(afterQualifier.startsWith(":") || afterQualifier.startsWith(","))) {
+  // v2 separates name and description with ":"; v3 attributes use " - ".
+  const separator = afterQualifier.startsWith(" - ") ? 2 : afterQualifier.startsWith(":") || afterQualifier.startsWith(",") ? 1 : 0;
+  if (!name || separator === 0) {
     return inline(line, bodyStart, line.length, push);
   }
 
@@ -91,9 +111,13 @@ function highlightLine(line: string, base: number, out: Token[]): void {
     push(cursor, cursor + qualifier[0].length, "qualifier");
     cursor += qualifier[0].length;
   }
-  push(cursor, cursor + 1, "punct");
-  cursor += 1;
+  push(separator === 2 ? cursor + 1 : cursor, cursor + separator, "punct");
+  cursor += separator;
+  describe(line, cursor, push);
+}
 
+/** Description, then (for leaves) the last unquoted " - " and the constraint. */
+function describe(line: string, cursor: number, push: (start: number, end: number, cls: TokenClass) => void): void {
   // v2 leaf: "name: description - constraint." — the last unquoted " - " splits them.
   const split = lastUnquotedDash(line, cursor);
   if (split === -1) {
@@ -116,6 +140,8 @@ function inline(line: string, from: number, to: number, push: (start: number, en
     const start = from + match.index;
     const end = start + word.length;
     if (word.startsWith('"')) push(start, end, "string");
+    else if (word.startsWith("[")) push(start, end, "string");
+    else if (word.startsWith(":")) push(start, end, "concept");
     else if (/^-?\d/.test(word)) push(start, end, "number");
     else if (KEYWORDS.has(word)) push(start, end, "keyword");
     else if (/^[A-Z]/.test(word)) push(start, end, "type");
