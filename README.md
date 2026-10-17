@@ -177,6 +177,13 @@ Pass `--dialect none` to render every entry opaquely, or `--dialect URI` to set
 an explicit context. See [the language contract](docs/language.md) for the exact
 boundary and grammar.
 
+## Demo
+
+[`demo/`](demo/README.md) is a Bun + Hono dev server with six synced panes:
+natural language, a slotted PlainType template, a value registry, raw and
+formatted PlainType, and the compiled JSON Schema. Registry edits update every
+pane instantly; natural-language edits go through a small Claude model.
+
 ## Verification
 
 ```bash

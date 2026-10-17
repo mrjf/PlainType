@@ -28,8 +28,6 @@ const stringValue = (value: JsonNode): boolean => value.type === "string";
 const booleanValue = (value: JsonNode): boolean => value.type === "boolean";
 const numberValue = (value: JsonNode): boolean => value.type === "number";
 const arrayValue = (value: JsonNode): boolean => value.type === "array";
-const stringArray = (value: JsonNode): boolean =>
-  value.type === "array" && value.items.every((item) => item.type === "string");
 const uniqueStringArray = (value: JsonNode): boolean => {
   if (value.type !== "array" || !value.items.every((item) => item.type === "string")) return false;
   return new Set(value.items.map((item) => item.type === "string" ? item.value : "")).size === value.items.length;

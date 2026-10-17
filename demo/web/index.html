@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PlainType Studio</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">¶</span>
+        <h1>PlainType Studio</h1>
+      </div>
+      <div class="status" id="status" role="status" aria-live="polite">
+        <span class="dot"></span><span id="status-text">Loading…</span>
+        <span class="status-meta" id="status-meta"></span>
+      </div>
+      <div class="actions">
+        <button type="button" id="retry" hidden>Retry</button>
+        <button type="button" id="revert" hidden>Revert text</button>
+        <button type="button" id="reset" class="quiet">Reset example</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="pane" id="pane-nat">
+        <header>
+          <h2>Natural language</h2>
+          <span class="hint">Edit freely. The model rewrites the other panes.</span>
+        </header>
+        <div class="editor prose">
+          <pre class="backdrop" id="nat-backdrop" aria-hidden="true"></pre>
+          <textarea id="nat" spellcheck="true" aria-label="Natural-language description"></textarea>
+        </div>
+        <footer class="notes" id="nat-notes"></footer>
+      </section>
+
+      <section class="pane" id="pane-template">
+        <header>
+          <h2>Template</h2>
+          <span class="hint">PlainType with <code>{{slots}}</code>. Edits apply instantly.</span>
+        </header>
+        <div class="editor code">
+          <pre class="backdrop" id="template-backdrop" aria-hidden="true"></pre>
+          <textarea id="template" spellcheck="false" aria-label="PlainType template"></textarea>
+        </div>
+      </section>
+
+      <section class="pane" id="pane-registry">
+        <header>
+          <h2>Value registry</h2>
+          <span class="hint">Slot → value. Change one and every pane updates.</span>
+        </header>
+        <div class="registry-scroll">
+          <table class="registry">
+            <thead>
+              <tr><th>Slot</th><th>Value</th><th>Used in</th></tr>
+            </thead>
+            <tbody id="registry"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="pane" id="pane-raw">
+        <header>
+          <h2>Raw PlainType</h2>
+          <span class="hint">Template with values filled in.</span>
+        </header>
+        <pre class="view code" id="raw"></pre>
+      </section>
+
+      <section class="pane" id="pane-formatted">
+        <header>
+          <h2>Formatted PlainType</h2>
+          <span class="badge" id="compile-badge"></span>
+        </header>
+        <pre class="view code" id="formatted"></pre>
+      </section>
+
+      <section class="pane" id="pane-json">
+        <header>
+          <h2>JSON Schema</h2>
+          <span class="hint">What the compiler produces.</span>
+        </header>
+        <pre class="view code" id="json"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
