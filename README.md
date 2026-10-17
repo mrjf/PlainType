@@ -1,6 +1,6 @@
-# SchemaPlain
+# PlainType
 
-SchemaPlain is a controlled-natural-language notation for JSON Schema. It borrows
+PlainType is a controlled-natural-language notation for JSON Schema. It borrows
 the readable, Markdown-like shape of
 [`***plain`](https://www.plainlang.org/docs/), while giving every sentence a
 deterministic grammar so a compiler—not an LLM—decides its meaning.
@@ -8,10 +8,10 @@ deterministic grammar so a compiler—not an LLM—decides its meaning.
 Its primary invariant is:
 
 ```text
-JSON Schema -> SchemaPlain -> JSON Schema = the same JSON data
+JSON Schema -> PlainType -> JSON Schema = the same JSON data
 ```
 
-SchemaPlain has two versioned surfaces. Version 1 is the complete, structured
+PlainType has two versioned surfaces. Version 1 is the complete, structured
 notation for Draft 2020-12. Version 2 is a compact conversational notation for
 common object, property, and union shapes, backed by an exact whole-schema
 escape. Schemas from older, custom, and future dialects remain lossless; their
@@ -20,7 +20,7 @@ semantics are not guessed.
 ## Conversational example (version 2)
 
 ```plain
-***schemaplain 2***
+***plaintype 2***
 
 - AnimalIdentifier: An identifier attached to an animal. Exactly one of:
   - Microchip: Identification using an implanted microchip.
@@ -48,10 +48,10 @@ reference. The JSON values are Animals—not reference or pointer values—so th
 surface language does not say “Animal references.”
 
 The complete paired files are
-[animal-identifier.conversational.schemaplain](examples/animal-identifier.conversational.schemaplain)
+[animal-identifier.conversational.plaintype](examples/animal-identifier.conversational.plaintype)
 and [animal-identifier.schema.json](examples/animal-identifier.schema.json).
 The recursive-reference form is demonstrated by
-[animal-family.conversational.schemaplain](examples/animal-family.conversational.schemaplain)
+[animal-family.conversational.plaintype](examples/animal-family.conversational.plaintype)
 and [animal-family.schema.json](examples/animal-family.schema.json).
 
 Version 2 uses a fixed expansion order so its concise phrases are exactly
@@ -59,7 +59,7 @@ reversible. When a schema does not fit that order or the supported concise
 vocabulary, it uses the universal form:
 
 ```plain
-***schemaplain 2***
+***plaintype 2***
 
 - Exact JSON Schema: {"type":"number","multipleOf":0.25}
 ```
@@ -90,7 +90,7 @@ This JSON Schema:
 becomes:
 
 ```plain
-***schemaplain 1***
+***plaintype 1***
 
 - It declares JSON Schema dialect "https://json-schema.org/draft/2020-12/schema".
 - Its title is "Person".
@@ -127,27 +127,27 @@ Node.js 20 or newer is required.
 npm install
 npm run build
 
-node dist/src/cli.js from-json person.schema.json -o person.schemaplain
+node dist/src/cli.js from-json person.schema.json -o person.plaintype
 node dist/src/cli.js from-json person.schema.json --style conversational
-node dist/src/cli.js to-json person.schemaplain -o person.schema.json
-node dist/src/cli.js check person.schemaplain
-node dist/src/cli.js format person.schemaplain
+node dist/src/cli.js to-json person.plaintype -o person.schema.json
+node dist/src/cli.js check person.plaintype
+node dist/src/cli.js format person.plaintype
 ```
 
-An installed or linked package exposes the shorter `schemaplain` binary. Both
+An installed or linked package exposes the shorter `plaintype` binary. Both
 conversion commands also accept standard input and write to standard output
 when paths are omitted.
 
-`structured` emits `***schemaplain 1***` and is the default for `from-json`.
-`conversational` emits `***schemaplain 2***`. With no `--style`, `format`
+`structured` emits `***plaintype 1***` and is the default for `from-json`.
+`conversational` emits `***plaintype 2***`. With no `--style`, `format`
 preserves the input document's version; an explicit style converts to that
 style and header.
 
 The library API exposes `fromJsonSchema`, `toJsonSchema`,
-`formatSchemaPlain`, and a lossless JSON AST:
+`formatPlainType`, and a lossless JSON AST:
 
 ```ts
-import { fromJsonSchema, toJsonSchema } from "schemaplain";
+import { fromJsonSchema, toJsonSchema } from "plaintype";
 
 const plain = fromJsonSchema('{"type":"string"}', { style: "conversational" });
 const json = toJsonSchema(plain);
@@ -157,7 +157,7 @@ const json = toJsonSchema(plain);
 
 The normative guarantee is JSON-data preservation, not byte-for-byte source
 preservation. JSON whitespace and string-escape spelling are canonicalized.
-SchemaPlain additionally retains object member order, duplicate member names,
+PlainType additionally retains object member order, duplicate member names,
 and raw number tokens such as `1e400` or a 40-digit integer, even though the JSON
 Schema data model does not require all of those distinctions.
 
@@ -185,7 +185,7 @@ npm run check
 npm run verify:suite -- /path/to/JSON-Schema-Test-Suite/tests/draft2020-12
 ```
 
-The suite verifier runs the JSON → SchemaPlain → JSON invariant over every
+The suite verifier runs the JSON → PlainType → JSON invariant over every
 schema in a local checkout of the official
 [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite).
 

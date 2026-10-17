@@ -1,6 +1,6 @@
-# SchemaPlain language contract
+# PlainType language contract
 
-SchemaPlain has two versioned, deterministic surface grammars over the same
+PlainType has two versioned, deterministic surface grammars over the same
 lossless JSON abstract syntax tree. The header selects the parser; it is not a
 comment or an advisory version number.
 
@@ -8,7 +8,7 @@ comment or an advisory version number.
 
 ### Scope
 
-SchemaPlain is controlled English over a lossless JSON abstract syntax tree.
+PlainType is controlled English over a lossless JSON abstract syntax tree.
 The compiler accepts only documented phrases. Synonyms and free-form prose are
 syntax errors, which is what makes reverse translation deterministic.
 
@@ -29,7 +29,7 @@ separate, versioned dialect profile.
 A document starts with the exact version heading:
 
 ```plain
-***schemaplain 1***
+***plaintype 1***
 ```
 
 The schema follows as two-space-indented bullet clauses and semantic `#`
@@ -175,7 +175,7 @@ If the root omits `$schema`, APIs and the CLI default its out-of-band context to
 that URI. This affects wording only; it never inserts or changes a JSON member.
 Set the context to `null` / `--dialect none` for fully opaque output.
 
-SchemaPlain does not fetch dialect URIs, resolve references, infer vocabularies,
+PlainType does not fetch dialect URIs, resolve references, infer vocabularies,
 or validate instances.
 
 ### Round-trip equality
@@ -192,13 +192,13 @@ object member sequence, and duplicate members.
 
 It intentionally does not retain insignificant whitespace, a BOM, or alternate
 string escape spelling. A future byte-faithful mode would need to carry source
-tokens or the original document alongside SchemaPlain; it is a different
+tokens or the original document alongside PlainType; it is a different
 contract from schema round-tripping.
 
 Formatting is canonical and idempotent:
 
 ```text
-format(format(SchemaPlain, style), style) = format(SchemaPlain, style)
+format(format(PlainType, style), style) = format(PlainType, style)
 ```
 
 ## Version 2: conversational grammar
@@ -208,7 +208,7 @@ format(format(SchemaPlain, style), style) = format(SchemaPlain, style)
 A version-2 document starts with:
 
 ```plain
-***schemaplain 2***
+***plaintype 2***
 ```
 
 It contains exactly one root schema bullet. The root may be a named object, a
@@ -218,8 +218,8 @@ Blank lines and two-space indentation follow the same lexical rules as version
 
 The API and CLI use style names to select the surface version:
 
-- `structured` emits `***schemaplain 1***` and is the `from-json` default.
-- `conversational` emits `***schemaplain 2***`.
+- `structured` emits `***plaintype 1***` and is the `from-json` default.
+- `conversational` emits `***plaintype 2***`.
 - `format` with no style preserves the source header: version 1 becomes
   structured and version 2 remains conversational.
 - An explicit format style converts to that style and its corresponding header.
@@ -417,9 +417,9 @@ parseJson(toJsonSchema(fromJsonSchema(J, style))) = parseJson(J)
 ```
 
 The canonical examples are
-[`animal-identifier.conversational.schemaplain`](../examples/animal-identifier.conversational.schemaplain)
+[`animal-identifier.conversational.plaintype`](../examples/animal-identifier.conversational.plaintype)
 and its fixed-order
 [`animal-identifier.schema.json`](../examples/animal-identifier.schema.json), plus
 the recursive pair
-[`animal-family.conversational.schemaplain`](../examples/animal-family.conversational.schemaplain)
+[`animal-family.conversational.plaintype`](../examples/animal-family.conversational.plaintype)
 and [`animal-family.schema.json`](../examples/animal-family.schema.json).

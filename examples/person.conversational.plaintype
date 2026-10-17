@@ -1,4 +1,4 @@
-***schemaplain 1***
+***plaintype 1***
 
 - It declares JSON Schema dialect "https://json-schema.org/draft/2020-12/schema".
 - Its identifier is "https://example.test/person".
@@ -6,11 +6,8 @@
 # A person record.
 - Its allowed type or types are "object".
 - Properties:
-  - name (required):
+  - name (required), which must be a string containing at least 1 character, or null.
     # The person's full name.
-    - allowed types:
-      - string (must contain at least 1 character)
-      - null
   - age:
     - allowed types:
       - integer

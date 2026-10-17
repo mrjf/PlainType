@@ -5,16 +5,16 @@ import { fileURLToPath } from "node:url";
 
 import {
   DRAFT_2020_12,
-  SchemaPlainSyntaxError,
-  formatSchemaPlain,
+  PlainTypeSyntaxError,
+  formatPlainType,
   fromJsonSchema,
   parseJson,
-  parseSchemaPlain,
+  parsePlainType,
   toJsonSchema,
 } from "../src/index.js";
 
-const HEADER = "***schemaplain 1***";
-const HEADER_V2 = "***schemaplain 2***";
+const HEADER = "***plaintype 1***";
+const HEADER_V2 = "***plaintype 2***";
 
 function assertSchemaRoundTrip(
   json: string,
@@ -26,16 +26,16 @@ function assertSchemaRoundTrip(
   return { plain, emitted };
 }
 
-function schemaPlainSyntaxError(source: string): SchemaPlainSyntaxError {
+function plainTypeSyntaxError(source: string): PlainTypeSyntaxError {
   let caught: unknown;
   try {
-    parseSchemaPlain(source);
+    parsePlainType(source);
   } catch (error) {
     caught = error;
   }
   assert.ok(
-    caught instanceof SchemaPlainSyntaxError,
-    `Expected SchemaPlainSyntaxError for ${JSON.stringify(source)}`,
+    caught instanceof PlainTypeSyntaxError,
+    `Expected PlainTypeSyntaxError for ${JSON.stringify(source)}`,
   );
   return caught;
 }
@@ -66,7 +66,7 @@ for (const fixture of markerSchemas) {
     const expectedPlain = `${HEADER}\n\n- ${fixture.clause}\n`;
     assert.equal(fromJsonSchema(fixture.json), expectedPlain);
     assert.equal(toJsonSchema(expectedPlain, { space: 0 }), fixture.compact);
-    assert.equal(formatSchemaPlain(expectedPlain), expectedPlain);
+    assert.equal(formatPlainType(expectedPlain), expectedPlain);
   });
 }
 
@@ -170,7 +170,7 @@ test("a representative Draft 2020-12 schema round-trips every keyword family", (
   assert.match(emitted, /"minimum": -0/);
   assert.match(emitted, /"exclusiveMinimum": -1\.2300e-004/);
 
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
   assert.equal(fromJsonSchema(emitted), plain);
 });
 
@@ -247,8 +247,8 @@ test("quoted property names that resemble conversational syntax remain unambiguo
   });
   const { plain } = assertSchemaRoundTrip(source, { style: "conversational" });
 
-  assert.match(plain, /^\*\*\*schemaplain 2\*\*\*\n\n- Exact JSON Schema:/);
-  assert.equal(formatSchemaPlain(plain, { style: "conversational" }), plain);
+  assert.match(plain, /^\*\*\*plaintype 2\*\*\*\n\n- Exact JSON Schema:/);
+  assert.equal(formatPlainType(plain, { style: "conversational" }), plain);
 
   const legacy = [
     HEADER,
@@ -376,7 +376,7 @@ test("description comments are semantic while $comment remains a distinct keywor
     toJsonSchema(authored, { space: 0 }),
     '{"description":"Authored descriptions become schema data."}\n',
   );
-  assert.equal(formatSchemaPlain(authored), authored);
+  assert.equal(formatPlainType(authored), authored);
 
   const describedProperty = JSON.stringify({
     properties: {
@@ -392,8 +392,8 @@ test("description comments are semantic while $comment remains a distinct keywor
     describedProperty,
     { style: "conversational" },
   ).plain;
-  assert.match(conversational, /^\*\*\*schemaplain 2\*\*\*\n\n- Exact JSON Schema:/);
-  assert.equal(formatSchemaPlain(conversational, { style: "conversational" }), conversational);
+  assert.match(conversational, /^\*\*\*plaintype 2\*\*\*\n\n- Exact JSON Schema:/);
+  assert.equal(formatPlainType(conversational, { style: "conversational" }), conversational);
 });
 
 test("descriptions unsafe for line comments retain their JSON-valued clause", () => {
@@ -434,10 +434,10 @@ test("structured and conversational property styles are deterministic and interc
   assert.equal(conversational, expectedConversational);
   assertSchemaRoundTrip(source, { style: "structured" });
   assertSchemaRoundTrip(source, { style: "conversational" });
-  assert.equal(formatSchemaPlain(structured, { style: "structured" }), structured);
-  assert.equal(formatSchemaPlain(conversational, { style: "conversational" }), conversational);
-  assert.equal(formatSchemaPlain(structured, { style: "conversational" }), conversational);
-  assert.equal(formatSchemaPlain(conversational, { style: "structured" }), structured);
+  assert.equal(formatPlainType(structured, { style: "structured" }), structured);
+  assert.equal(formatPlainType(conversational, { style: "conversational" }), conversational);
+  assert.equal(formatPlainType(structured, { style: "conversational" }), conversational);
+  assert.equal(formatPlainType(conversational, { style: "structured" }), structured);
   assert.equal(fromJsonSchema(toJsonSchema(conversational), { style: "conversational" }), conversational);
 });
 
@@ -452,7 +452,7 @@ test("an unknown declared dialect renders every member opaquely", () => {
 
   assert.doesNotMatch(plain, /allowed type|property schemas|declares JSON Schema dialect/);
   assert.equal((plain.match(/exact JSON Schema entry/g) ?? []).length, 4);
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
 });
 
 test("defaultDialect null forces opaque rendering without inserting $schema", () => {
@@ -462,10 +462,10 @@ test("defaultDialect null forces opaque rendering without inserting $schema", ()
   assert.equal((plain.match(/exact JSON Schema entry/g) ?? []).length, 2);
   assert.deepEqual(parseJson(toJsonSchema(plain)), parseJson(source));
   assert.doesNotMatch(toJsonSchema(plain), /\$schema/);
-  assert.equal(formatSchemaPlain(plain, { defaultDialect: null }), plain);
+  assert.equal(formatPlainType(plain, { defaultDialect: null }), plain);
 });
 
-test("huge numbers and every raw numeric spelling survive SchemaPlain", () => {
+test("huge numbers and every raw numeric spelling survive PlainType", () => {
   const source = String.raw`{"minimum":-0,"maximum":999999999999999999999999999999999999999999999999999999999999,"multipleOf":1.2300e-999999,"const":9E+999999}`;
   const plain = fromJsonSchema(source);
 
@@ -520,7 +520,7 @@ test("Unicode strings, JSON escapes, and unusual map keys round-trip as decoded 
   assert.ok(plain.includes('Its title is "雪 😀 𝄞".'));
   assert.ok(plain.includes('"a/b~c\\n\\"\\\\雪" (required):'));
   assert.ok(plain.includes(String.raw`["x-🔒","\u0000"]`));
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
 });
 
 test("Unicode line and paragraph separators remain valid inside inline JSON", () => {
@@ -537,7 +537,7 @@ test("Unicode line and paragraph separators remain valid inside inline JSON", ()
   const { plain } = assertSchemaRoundTrip(source);
   assert.ok(plain.includes(lineSeparator));
   assert.ok(plain.includes(paragraphSeparator));
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
 });
 
 test("schema arrays and schema maps preserve emptiness, order, and boolean schemas", () => {
@@ -562,7 +562,7 @@ test("schema arrays and schema maps preserve emptiness, order, and boolean schem
   assert.match(plain, /Its item schema is:\n  - Every instance is accepted\./);
 });
 
-test("formatSchemaPlain canonicalizes whitespace and is idempotent", () => {
+test("formatPlainType canonicalizes whitespace and is idempotent", () => {
   const authored = [
     "",
     HEADER,
@@ -587,13 +587,13 @@ test("formatSchemaPlain canonicalizes whitespace and is idempotent", () => {
     "",
   ].join("\n");
 
-  const once = formatSchemaPlain(authored);
+  const once = formatPlainType(authored);
   assert.equal(once, expected);
-  assert.equal(formatSchemaPlain(once), once);
+  assert.equal(formatPlainType(once), once);
   assert.equal(fromJsonSchema(toJsonSchema(authored)), once);
 });
 
-test("SchemaPlain to JSON honors compact and pretty output deterministically", () => {
+test("PlainType to JSON honors compact and pretty output deterministically", () => {
   const source = `${HEADER}\n\n- Its title is "Demo".\n- Its required property names are ["x"].\n`;
   assert.equal(toJsonSchema(source, { space: 0 }), '{"title":"Demo","required":["x"]}\n');
   assert.equal(
@@ -669,7 +669,7 @@ const malformedPlainCases = [
     name: "missing header",
     source: "- Every instance is accepted.\n",
     line: 1,
-    message: "Expected ***schemaplain 1***",
+    message: "Expected ***plaintype 1***",
   },
   {
     name: "missing schema clause",
@@ -746,8 +746,8 @@ const malformedPlainCases = [
 ] as const;
 
 for (const fixture of malformedPlainCases) {
-  test(`parseSchemaPlain reports the source line for ${fixture.name}`, () => {
-    const error = schemaPlainSyntaxError(fixture.source);
+  test(`parsePlainType reports the source line for ${fixture.name}`, () => {
+    const error = plainTypeSyntaxError(fixture.source);
     assert.equal(error.line, fixture.line);
     assert.match(error.message, new RegExp(fixture.message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(error.message, new RegExp(` at line ${fixture.line}$`));

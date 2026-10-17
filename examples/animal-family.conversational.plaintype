@@ -1,4 +1,4 @@
-***schemaplain 2***
+***plaintype 2***
 
 - AnimalFamily: A family tree for an animal.
   - animal: The animal represented here - an Animal.

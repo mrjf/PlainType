@@ -22,8 +22,8 @@ import {
   type JsonObjectEntry,
 } from "./json.js";
 
-const HEADER_V1 = "***schemaplain 1***";
-const HEADER_V2 = "***schemaplain 2***";
+const HEADER_V1 = "***plaintype 1***";
+const HEADER_V2 = "***plaintype 2***";
 const ALLOW_ALL = "Every instance is accepted.";
 const DENY_ALL = "No instance is accepted.";
 const EMPTY_SCHEMA = "No constraints or annotations are specified.";
@@ -37,7 +37,7 @@ const V2_ADDITIONAL_UNSPECIFIED = "Additional properties unspecified";
 const V2_DEFINITIONS = "Definitions:";
 const V2_UNION_SUFFIX = " Exactly one of:";
 
-type SchemaPlainVersion = 1 | 2;
+type PlainTypeVersion = 1 | 2;
 
 export type RenderStyle = "structured" | "conversational";
 
@@ -59,12 +59,12 @@ export interface ToJsonOptions {
   readonly space?: number;
 }
 
-export class SchemaPlainSyntaxError extends SyntaxError {
+export class PlainTypeSyntaxError extends SyntaxError {
   public readonly line: number;
 
   public constructor(message: string, line: number) {
     super(`${message} at line ${line}`);
-    this.name = "SchemaPlainSyntaxError";
+    this.name = "PlainTypeSyntaxError";
     this.line = line;
   }
 }
@@ -91,7 +91,7 @@ const DRAFT_2020_12_PROFILE: RenderProfile = {
 
 const NO_PROFILE: RenderProfile = { values: [], schemas: [], maps: [], arrays: [] };
 
-/** Convert a JSON Schema JSON document into canonical SchemaPlain. */
+/** Convert a JSON Schema JSON document into canonical PlainType. */
 export function fromJsonSchema(json: string, options: FromJsonOptions = {}): string {
   const schema = parseJson(json);
   if (!isSchemaNode(schema)) {
@@ -106,48 +106,48 @@ export function fromJsonSchema(json: string, options: FromJsonOptions = {}): str
   return `${lines.join("\n")}\n`;
 }
 
-/** Convert SchemaPlain into canonical JSON Schema JSON. */
+/** Convert PlainType into canonical JSON Schema JSON. */
 export function toJsonSchema(source: string, options: ToJsonOptions = {}): string {
-  const schema = parseSchemaPlain(source);
+  const schema = parsePlainType(source);
   const space = options.space ?? 2;
   return `${stringifyJson(schema, space)}\n`;
 }
 
-/** Parse SchemaPlain into the lossless JSON AST used by the converter. */
-export function parseSchemaPlain(source: string): JsonNode {
-  return parseSchemaPlainDocument(source).schema;
+/** Parse PlainType into the lossless JSON AST used by the converter. */
+export function parsePlainType(source: string): JsonNode {
+  return parsePlainTypeDocument(source).schema;
 }
 
-function parseSchemaPlainDocument(source: string): { version: SchemaPlainVersion; schema: JsonNode } {
+function parsePlainTypeDocument(source: string): { version: PlainTypeVersion; schema: JsonNode } {
   const normalized = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const lines = normalized.split("\n");
   let headerIndex = 0;
   while (headerIndex < lines.length && lines[headerIndex]?.trim() === "") {
     if (lines[headerIndex]?.includes("\t")) {
-      throw new SchemaPlainSyntaxError("Tabs are not allowed for indentation", headerIndex + 1);
+      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", headerIndex + 1);
     }
     headerIndex += 1;
   }
   const header = lines[headerIndex];
-  const version: SchemaPlainVersion = header === HEADER_V1
+  const version: PlainTypeVersion = header === HEADER_V1
     ? 1
     : header === HEADER_V2
       ? 2
       : (() => {
-          throw new SchemaPlainSyntaxError(`Expected ${HEADER_V1} or ${HEADER_V2}`, headerIndex + 1);
+          throw new PlainTypeSyntaxError(`Expected ${HEADER_V1} or ${HEADER_V2}`, headerIndex + 1);
         })();
 
   const bullets = parseBullets(lines, headerIndex + 1);
   if (bullets.length === 0) {
-    throw new SchemaPlainSyntaxError("Expected at least one schema clause", headerIndex + 2);
+    throw new PlainTypeSyntaxError("Expected at least one schema clause", headerIndex + 2);
   }
   const schema = version === 2 ? schemaFromV2Bullets(bullets) : schemaFromBullets(bullets);
   return { version, schema };
 }
 
-/** Canonicalize an already-authored SchemaPlain document. */
-export function formatSchemaPlain(source: string, options: FromJsonOptions = {}): string {
-  const parsed = parseSchemaPlainDocument(source);
+/** Canonicalize an already-authored PlainType document. */
+export function formatPlainType(source: string, options: FromJsonOptions = {}): string {
+  const parsed = parsePlainTypeDocument(source);
   const schema = parsed.schema;
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
@@ -1004,10 +1004,10 @@ function joinNaturalList(values: readonly string[]): string {
 
 function schemaFromV2Bullets(bullets: readonly Bullet[]): JsonNode {
   if (bullets.length !== 1) {
-    throw new SchemaPlainSyntaxError("A version-2 document needs exactly one root schema declaration", bullets[1]?.line ?? bullets[0]?.line ?? 1);
+    throw new PlainTypeSyntaxError("A version-2 document needs exactly one root schema declaration", bullets[1]?.line ?? bullets[0]?.line ?? 1);
   }
   const bullet = bullets[0];
-  if (bullet === undefined) throw new SchemaPlainSyntaxError("Expected a schema declaration", 1);
+  if (bullet === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
   const context = v2ReferenceContextFromBullet(bullet);
   return schemaFromV2Bullet(bullet, context, true);
 }
@@ -1023,16 +1023,16 @@ function v2ReferenceContextFromBullet(bullet: Bullet): V2ReferenceContext {
   const root = parseV2Declaration(bullet.text, bullet.line);
   const definitionsSections = bullet.children.filter(({ text }) => text === V2_DEFINITIONS);
   if (definitionsSections.length > 1) {
-    throw new SchemaPlainSyntaxError("An object may have only one Definitions section", definitionsSections[1]?.line ?? bullet.line);
+    throw new PlainTypeSyntaxError("An object may have only one Definitions section", definitionsSections[1]?.line ?? bullet.line);
   }
   const definitionNames = new Set<string>();
   for (const definitionBullet of definitionsSections[0]?.children ?? []) {
     const definition = parseV2Declaration(definitionBullet.text, definitionBullet.line);
     if (definitionNames.has(definition.name)) {
-      throw new SchemaPlainSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
+      throw new PlainTypeSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
     }
     if (definition.name === root.name) {
-      throw new SchemaPlainSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
+      throw new PlainTypeSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
     }
     definitionNames.add(definition.name);
   }
@@ -1053,14 +1053,14 @@ function schemaFromV2Bullet(
     requireNoChildren(bullet);
     const schema = parseEmbeddedJson(bullet.text.slice(exactPrefix.length), bullet.line);
     if (!isSchemaNode(schema)) {
-      throw new SchemaPlainSyntaxError("An exact JSON Schema must be an object or boolean", bullet.line);
+      throw new PlainTypeSyntaxError("An exact JSON Schema must be an object or boolean", bullet.line);
     }
     return schema;
   }
 
   const declaration = parseV2Declaration(bullet.text, bullet.line);
   if (declaration.optional) {
-    throw new SchemaPlainSyntaxError("A root schema or alternative cannot be optional", bullet.line);
+    throw new PlainTypeSyntaxError("A root schema or alternative cannot be optional", bullet.line);
   }
 
   if (!declaration.body.endsWith(V2_UNION_SUFFIX)) {
@@ -1068,10 +1068,10 @@ function schemaFromV2Bullet(
   }
   const description = declaration.body.slice(0, -V2_UNION_SUFFIX.length);
   if (description === "" || !isSafeV2InlineDescription(description)) {
-    throw new SchemaPlainSyntaxError("A named alternative schema needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("A named alternative schema needs a safe inline description", bullet.line);
   }
   if (bullet.children.length === 0) {
-    throw new SchemaPlainSyntaxError("'exactly one of:' needs at least one alternative", bullet.line);
+    throw new PlainTypeSyntaxError("'exactly one of:' needs at least one alternative", bullet.line);
   }
   return objectNode([
     { key: "title", value: { type: "string", value: declaration.name } },
@@ -1091,7 +1091,7 @@ function schemaFromV2Object(
   allowDefinitions: boolean,
 ): JsonObject {
   if (declaration.body === "" || !isSafeV2InlineDescription(declaration.body)) {
-    throw new SchemaPlainSyntaxError("An object declaration needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("An object declaration needs a safe inline description", bullet.line);
   }
   const properties: JsonObjectEntry[] = [];
   const required: JsonNode[] = [];
@@ -1104,10 +1104,10 @@ function schemaFromV2Object(
     if (child.text === V2_ADDITIONAL_ALLOWED || child.text === V2_ADDITIONAL_UNSPECIFIED) {
       requireNoChildren(child);
       if (sawAdditionalDirective) {
-        throw new SchemaPlainSyntaxError("An object may have only one additional-properties directive", child.line);
+        throw new PlainTypeSyntaxError("An object may have only one additional-properties directive", child.line);
       }
       if (index !== bullet.children.length - 1) {
-        throw new SchemaPlainSyntaxError("The additional-properties directive must be the object's final child", child.line);
+        throw new PlainTypeSyntaxError("The additional-properties directive must be the object's final child", child.line);
       }
       sawAdditionalDirective = true;
       additionalMode = child.text === V2_ADDITIONAL_ALLOWED ? "allowed" : "unspecified";
@@ -1116,26 +1116,26 @@ function schemaFromV2Object(
 
     if (child.text === V2_DEFINITIONS) {
       if (!allowDefinitions) {
-        throw new SchemaPlainSyntaxError("Definitions are supported only on the root object", child.line);
+        throw new PlainTypeSyntaxError("Definitions are supported only on the root object", child.line);
       }
       if (sawDefinitions) {
-        throw new SchemaPlainSyntaxError("An object may have only one Definitions section", child.line);
+        throw new PlainTypeSyntaxError("An object may have only one Definitions section", child.line);
       }
       if (sawAdditionalDirective) {
-        throw new SchemaPlainSyntaxError("Definitions must precede the additional-properties directive", child.line);
+        throw new PlainTypeSyntaxError("Definitions must precede the additional-properties directive", child.line);
       }
       sawDefinitions = true;
       const entries: JsonObjectEntry[] = [];
       for (const definitionBullet of child.children) {
         const definition = parseV2Declaration(definitionBullet.text, definitionBullet.line);
         if (definition.optional) {
-          throw new SchemaPlainSyntaxError("A reusable definition cannot be optional", definitionBullet.line);
+          throw new PlainTypeSyntaxError("A reusable definition cannot be optional", definitionBullet.line);
         }
         if (definition.body.endsWith(V2_UNION_SUFFIX)) {
-          throw new SchemaPlainSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
+          throw new PlainTypeSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
         }
         if (entries.some(({ key }) => key === definition.name)) {
-          throw new SchemaPlainSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
+          throw new PlainTypeSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
         }
         entries.push({
           key: definition.name,
@@ -1147,12 +1147,12 @@ function schemaFromV2Object(
     }
 
     if (sawDefinitions) {
-      throw new SchemaPlainSyntaxError("Only the additional-properties directive may follow Definitions", child.line);
+      throw new PlainTypeSyntaxError("Only the additional-properties directive may follow Definitions", child.line);
     }
 
     const parsed = propertyFromV2Bullet(child, context);
     if (properties.some(({ key }) => key === parsed.name)) {
-      throw new SchemaPlainSyntaxError(`Duplicate compact property ${jsonString(parsed.name)} is ambiguous`, child.line);
+      throw new PlainTypeSyntaxError(`Duplicate compact property ${jsonString(parsed.name)} is ambiguous`, child.line);
     }
     properties.push({ key: parsed.name, value: parsed.schema });
     if (!parsed.optional) required.push({ type: "string", value: parsed.name });
@@ -1179,7 +1179,7 @@ function propertyFromV2Bullet(
 ): { name: string; optional: boolean; schema: JsonNode } {
   const declaration = parseV2Declaration(bullet.text, bullet.line);
   if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
-    throw new SchemaPlainSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
+    throw new PlainTypeSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
   }
   const separator = lastUnquotedSeparator(declaration.body, " - ");
   const hasLeafShape = separator >= 0 && declaration.body.endsWith(".");
@@ -1194,7 +1194,7 @@ function propertyFromV2Bullet(
   const description = declaration.body.slice(0, separator);
   const constraint = declaration.body.slice(separator + 3, -1);
   if (description === "" || !isSafeV2InlineDescription(description)) {
-    throw new SchemaPlainSyntaxError("A property needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("A property needs a safe inline description", bullet.line);
   }
   return {
     name: declaration.name,
@@ -1246,7 +1246,7 @@ function entriesFromV2Constraint(
   const externalReference = nullable ? null : /^a reference to ("(?:[^"\\]|\\[\s\S])*")$/.exec(base);
   if (externalReference !== null) {
     const reference = parseEmbeddedJson(externalReference[1] ?? "", line);
-    if (reference.type !== "string") throw new SchemaPlainSyntaxError("Expected a reference URI string", line);
+    if (reference.type !== "string") throw new PlainTypeSyntaxError("Expected a reference URI string", line);
     return [{ key: "$ref", value: reference }];
   }
 
@@ -1269,7 +1269,7 @@ function entriesFromV2Constraint(
   if (digits !== null) {
     const raw = digits[1] === "one" ? "1" : digits[1] ?? "0";
     const expected = raw === "1" ? "digit" : "digits";
-    if (digits[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (digits[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [
       typeEntry("string"),
       { key: "pattern", value: { type: "string", value: `^[0-9]{${raw}}$` } },
@@ -1280,7 +1280,7 @@ function entriesFromV2Constraint(
   if (atLeast !== null) {
     const length = v2CountNode(atLeast[1] ?? "", line);
     const expected = isMathematicalOne(length.raw) ? "character" : "characters";
-    if (atLeast[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (atLeast[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [typeEntry("string"), { key: "minLength", value: length }];
   }
 
@@ -1288,7 +1288,7 @@ function entriesFromV2Constraint(
   if (exact !== null) {
     const length = v2CountNode(exact[1] ?? "", line);
     const expected = isMathematicalOne(length.raw) ? "character" : "characters";
-    if (exact[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (exact[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [
       typeEntry("string"),
       { key: "minLength", value: length },
@@ -1314,27 +1314,27 @@ function entriesFromV2Constraint(
     ];
   }
 
-  throw new SchemaPlainSyntaxError(`Unknown version-2 constraint ${JSON.stringify(source)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown version-2 constraint ${JSON.stringify(source)}`, line);
 }
 
 function v2NamedReference(name: string, line: number, context: V2ReferenceContext): string {
   if (name === context.rootName) return "#";
   if (context.definitionNames.has(name)) return `#/$defs/${name}`;
-  throw new SchemaPlainSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
 }
 
 function v2CountNode(source: string, line: number): Extract<JsonNode, { type: "number" }> {
   const node = v2NumberNode(source === "one" ? "1" : source, line);
   const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
   if (codec === undefined || !codec.accepts(node)) {
-    throw new SchemaPlainSyntaxError("A character count must be a non-negative JSON integer", line);
+    throw new PlainTypeSyntaxError("A character count must be a non-negative JSON integer", line);
   }
   return node;
 }
 
 function v2NumberNode(source: string, line: number): Extract<JsonNode, { type: "number" }> {
   const node = parseEmbeddedJson(source, line);
-  if (node.type !== "number") throw new SchemaPlainSyntaxError("Expected a JSON number", line);
+  if (node.type !== "number") throw new PlainTypeSyntaxError("Expected a JSON number", line);
   return node;
 }
 
@@ -1353,16 +1353,16 @@ function parseV2NaturalStringList(source: string, line: number): string[] {
   while (cursor < source.length) {
     const parsingFinalValue = finalExpected;
     if (source[cursor] !== '"') {
-      throw new SchemaPlainSyntaxError("An inline enum currently supports JSON strings only", line);
+      throw new PlainTypeSyntaxError("An inline enum currently supports JSON strings only", line);
     }
     const end = endOfJsonStringToken(source, cursor, line);
     const value = parseEmbeddedJson(source.slice(cursor, end), line);
-    if (value.type !== "string") throw new SchemaPlainSyntaxError("Expected an enum string", line);
+    if (value.type !== "string") throw new PlainTypeSyntaxError("Expected an enum string", line);
     values.push(value.value);
     cursor = end;
     if (parsingFinalValue) {
       if (cursor !== source.length) {
-        throw new SchemaPlainSyntaxError("The final enum value must end the constraint", line);
+        throw new PlainTypeSyntaxError("The final enum value must end the constraint", line);
       }
       finalExpected = false;
       break;
@@ -1377,12 +1377,12 @@ function parseV2NaturalStringList(source: string, line: number): string[] {
     } else if (source.startsWith(", ", cursor)) {
       cursor += 2;
     } else {
-      throw new SchemaPlainSyntaxError("Expected a comma or 'or' between enum values", line);
+      throw new PlainTypeSyntaxError("Expected a comma or 'or' between enum values", line);
     }
   }
-  if (finalExpected) throw new SchemaPlainSyntaxError("Expected the final enum value", line);
+  if (finalExpected) throw new PlainTypeSyntaxError("Expected the final enum value", line);
   if (values.length === 0 || new Set(values).size !== values.length) {
-    throw new SchemaPlainSyntaxError("An inline enum needs unique string values", line);
+    throw new PlainTypeSyntaxError("An inline enum needs unique string values", line);
   }
   return values;
 }
@@ -1396,7 +1396,7 @@ function parseV2Declaration(source: string, line: number): V2Declaration {
     cursor = end;
   } else {
     const match = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(source);
-    if (match === null) throw new SchemaPlainSyntaxError("Expected a safe name or JSON string", line);
+    if (match === null) throw new PlainTypeSyntaxError("Expected a safe name or JSON string", line);
     nameToken = match[0];
     cursor = nameToken.length;
   }
@@ -1405,19 +1405,19 @@ function parseV2Declaration(source: string, line: number): V2Declaration {
   let object = false;
   if (source.startsWith(" (", cursor)) {
     const close = source.indexOf(")", cursor + 2);
-    if (close < 0) throw new SchemaPlainSyntaxError("Unclosed declaration qualifiers", line);
+    if (close < 0) throw new PlainTypeSyntaxError("Unclosed declaration qualifiers", line);
     const qualifiers = source.slice(cursor + 2, close).split(", ");
     if (new Set(qualifiers).size !== qualifiers.length) {
-      throw new SchemaPlainSyntaxError("Duplicate declaration qualifier", line);
+      throw new PlainTypeSyntaxError("Duplicate declaration qualifier", line);
     }
     for (const qualifier of qualifiers) {
       if (qualifier === "optional") optional = true;
       else if (qualifier === "object") object = true;
-      else throw new SchemaPlainSyntaxError(`Unknown declaration qualifier ${JSON.stringify(qualifier)}`, line);
+      else throw new PlainTypeSyntaxError(`Unknown declaration qualifier ${JSON.stringify(qualifier)}`, line);
     }
     cursor = close + 1;
   }
-  if (source[cursor] !== ":") throw new SchemaPlainSyntaxError("Expected ':' after the declaration name", line);
+  if (source[cursor] !== ":") throw new PlainTypeSyntaxError("Expected ':' after the declaration name", line);
   cursor += 1;
   if (source[cursor] === " ") cursor += 1;
   return { name, optional, object, body: source.slice(cursor) };
@@ -1435,7 +1435,7 @@ function endOfJsonStringToken(source: string, start: number, line: number): numb
       return index + 1;
     }
   }
-  throw new SchemaPlainSyntaxError("Unterminated JSON string token", line);
+  throw new PlainTypeSyntaxError("Unterminated JSON string token", line);
 }
 
 function lastUnquotedSeparator(source: string, separator: string): number {
@@ -1474,28 +1474,28 @@ function parseBullets(lines: readonly string[], startIndex: number): Bullet[] {
   for (let index = startIndex; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     if (line.includes("\t")) {
-      throw new SchemaPlainSyntaxError("Tabs are not allowed for indentation", index + 1);
+      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", index + 1);
     }
     if (line.trim() === "") continue;
     const bulletMatch = /^( *)(- )([\s\S]*)$/.exec(line);
     const commentMatch = /^( *)#(?: ([\s\S]*))?$/.exec(line);
     if (bulletMatch === null && commentMatch === null) {
-      throw new SchemaPlainSyntaxError("Expected a bullet clause or '# ' description", index + 1);
+      throw new PlainTypeSyntaxError("Expected a bullet clause or '# ' description", index + 1);
     }
     const spaces = (bulletMatch?.[1] ?? commentMatch?.[1])?.length ?? 0;
     if (spaces % 2 !== 0) {
-      throw new SchemaPlainSyntaxError("Indentation must use multiples of two spaces", index + 1);
+      throw new PlainTypeSyntaxError("Indentation must use multiples of two spaces", index + 1);
     }
     const depth = spaces / 2;
     while (lists.length > depth + 1) lists.pop();
     if (depth > lists.length) {
-      throw new SchemaPlainSyntaxError("Indentation skipped a nesting level", index + 1);
+      throw new PlainTypeSyntaxError("Indentation skipped a nesting level", index + 1);
     }
     if (depth === lists.length) {
       const parentList = lists[depth - 1];
       const parent = parentList?.at(-1);
       if (parent === undefined) {
-        throw new SchemaPlainSyntaxError("An indented clause needs a parent clause", index + 1);
+        throw new PlainTypeSyntaxError("An indented clause needs a parent clause", index + 1);
       }
       lists.push(parent.children);
     }
@@ -1503,7 +1503,7 @@ function parseBullets(lines: readonly string[], startIndex: number): Bullet[] {
     const text = comment === null
       ? bulletMatch?.[3] ?? ""
       : `Its description is ${jsonString(comment)}.`;
-    if (text === "") throw new SchemaPlainSyntaxError("A bullet clause cannot be empty", index + 1);
+    if (text === "") throw new PlainTypeSyntaxError("A bullet clause cannot be empty", index + 1);
     lists[depth]?.push({ text, line: index + 1, children: [] });
   }
   return roots;
@@ -1530,7 +1530,7 @@ function schemaFromBullets(bullets: readonly Bullet[]): JsonNode {
     ({ text }) => text === ALLOW_ALL || text === DENY_ALL || text === EMPTY_SCHEMA,
   );
   if (marker !== undefined) {
-    throw new SchemaPlainSyntaxError("A boolean or empty schema marker must be the only clause", marker.line);
+    throw new PlainTypeSyntaxError("A boolean or empty schema marker must be the only clause", marker.line);
   }
   return objectNode(bullets.flatMap(entriesFromBullet));
 }
@@ -1545,7 +1545,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     const value = parseEmbeddedJson(legacyRequired, bullet.line);
     const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "required");
     if (codec === undefined || !codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError("Legacy required properties must be a unique array of strings", bullet.line);
+      throw new PlainTypeSyntaxError("Legacy required properties must be a unique array of strings", bullet.line);
     }
     return [{ key: "required", value }];
   }
@@ -1556,7 +1556,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     requireNoChildren(bullet);
     const value = parseEmbeddedJson(raw, bullet.line);
     if (!codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         `The value does not have the required shape for ${JSON.stringify(codec.keyword)}; use the exact-entry clause to preserve it opaquely`,
         bullet.line,
       );
@@ -1569,20 +1569,20 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     requireNoChildren(bullet);
     const pair = parseEmbeddedJson(exactRaw, bullet.line);
     if (pair.type !== "array" || pair.items.length !== 2 || pair.items[0]?.type !== "string") {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         "An exact entry must be a two-item JSON array containing a string name and its value",
         bullet.line,
       );
     }
     const value = pair.items[1];
-    if (value === undefined) throw new SchemaPlainSyntaxError("The exact entry has no value", bullet.line);
+    if (value === undefined) throw new PlainTypeSyntaxError("The exact entry has no value", bullet.line);
     return [{ key: pair.items[0].value, value }];
   }
 
   for (const codec of SCHEMA_CODECS_2020_12) {
     if (bullet.text !== codec.clause) continue;
     if (bullet.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${JSON.stringify(codec.keyword)} needs a nested schema`, bullet.line);
+      throw new PlainTypeSyntaxError(`${JSON.stringify(codec.keyword)} needs a nested schema`, bullet.line);
     }
     return [{ key: codec.keyword, value: schemaFromBullets(bullet.children) }];
   }
@@ -1597,7 +1597,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     return [{ key: codec.keyword, value: schemaArrayFromBullet(bullet, codec) }];
   }
 
-  throw new SchemaPlainSyntaxError(`Unknown schema clause ${JSON.stringify(bullet.text)}`, bullet.line);
+  throw new PlainTypeSyntaxError(`Unknown schema clause ${JSON.stringify(bullet.text)}`, bullet.line);
 }
 
 function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
@@ -1608,7 +1608,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     if (child.text.endsWith(":")) {
       const parsed = structuredPropertyLabel(child);
       if (child.children.length === 0) {
-        throw new SchemaPlainSyntaxError(`Property ${jsonString(parsed.name)} needs a nested schema`, child.line);
+        throw new PlainTypeSyntaxError(`Property ${jsonString(parsed.name)} needs a nested schema`, child.line);
       }
       properties.push({ key: parsed.name, value: schemaFromBullets(child.children) });
       if (parsed.required) required.push({ type: "string", value: parsed.name });
@@ -1617,7 +1617,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
 
     const conversational = propertyFromConversationalBullet(child);
     if (conversational === null) {
-      throw new SchemaPlainSyntaxError("Expected '<property name>:' or a conversational property sentence", child.line);
+      throw new PlainTypeSyntaxError("Expected '<property name>:' or a conversational property sentence", child.line);
     }
     properties.push({ key: conversational.name, value: conversational.schema });
     if (conversational.required) required.push({ type: "string", value: conversational.name });
@@ -1631,7 +1631,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
 
 function structuredPropertyLabel(bullet: Bullet): { name: string; required: boolean } {
   if (!bullet.text.endsWith(":")) {
-    throw new SchemaPlainSyntaxError("Expected '<property name>:' or a conversational property sentence", bullet.line);
+    throw new PlainTypeSyntaxError("Expected '<property name>:' or a conversational property sentence", bullet.line);
   }
   let token = bullet.text.slice(0, -1);
   let required = false;
@@ -1672,19 +1672,19 @@ function propertyFromConversationalBullet(
       bullet.line,
     );
   } else {
-    throw new SchemaPlainSyntaxError("Unknown conversational property constraint", bullet.line);
+    throw new PlainTypeSyntaxError("Unknown conversational property constraint", bullet.line);
   }
 
   if (bullet.children.length > 0) {
     if (schema.type !== "object") {
-      throw new SchemaPlainSyntaxError("Only an object-form conversational property may have descriptions", bullet.line);
+      throw new PlainTypeSyntaxError("Only an object-form conversational property may have descriptions", bullet.line);
     }
     const annotations = schemaFromBullets(bullet.children);
     if (
       annotations.type !== "object" ||
       annotations.entries.some(({ key, value }) => key !== "description" || value.type !== "string")
     ) {
-      throw new SchemaPlainSyntaxError("Conversational property children must be '# ' descriptions", bullet.line);
+      throw new PlainTypeSyntaxError("Conversational property children must be '# ' descriptions", bullet.line);
     }
     schema = objectNode([...annotations.entries, ...schema.entries]);
   }
@@ -1701,7 +1701,7 @@ function schemaFromConversationalTypes(source: string, line: number): JsonObject
     types.push(parsed.type);
     if (parsed.minLength !== null) {
       if (minLength !== null) {
-        throw new SchemaPlainSyntaxError("Only one string type may carry a length constraint", line);
+        throw new PlainTypeSyntaxError("Only one string type may carry a length constraint", line);
       }
       minLength = parsed.minLength;
     }
@@ -1712,7 +1712,7 @@ function schemaFromConversationalTypes(source: string, line: number): JsonObject
     : arrayNode(types.map((value) => ({ type: "string", value })));
   const typeCodec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "type");
   if (typeCodec === undefined || !typeCodec.accepts(typeValue)) {
-    throw new SchemaPlainSyntaxError("Conversational types must be unique JSON Schema types", line);
+    throw new PlainTypeSyntaxError("Conversational types must be unique JSON Schema types", line);
   }
   return objectNode([
     { key: "type", value: typeValue },
@@ -1748,20 +1748,20 @@ function parseConversationalType(part: string, line: number): { type: string; mi
     const value = parseEmbeddedJson(stringMatch[1] ?? "", line);
     const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
     if (codec === undefined || !codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError("A string length must be a non-negative JSON integer", line);
+      throw new PlainTypeSyntaxError("A string length must be a non-negative JSON integer", line);
     }
     const expectedUnit = value.type === "number" && isMathematicalOne(value.raw) ? "character" : "characters";
     if (stringMatch[2] !== expectedUnit) {
-      throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, line);
+      throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, line);
     }
     return { type: "string", minLength: value };
   }
-  throw new SchemaPlainSyntaxError(`Unknown conversational type ${JSON.stringify(part)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown conversational type ${JSON.stringify(part)}`, line);
 }
 
 function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
   if (bullet.children.length === 0) {
-    throw new SchemaPlainSyntaxError("allowed types needs at least one nested type", bullet.line);
+    throw new PlainTypeSyntaxError("allowed types needs at least one nested type", bullet.line);
   }
   const types: string[] = [];
   let minLength: JsonNode | null = null;
@@ -1772,18 +1772,18 @@ function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     if (stringMatch !== null) {
       type = "string";
       if (minLength !== null) {
-        throw new SchemaPlainSyntaxError("Only one string type may carry a length constraint", child.line);
+        throw new PlainTypeSyntaxError("Only one string type may carry a length constraint", child.line);
       }
       minLength = parseEmbeddedJson(stringMatch[1] ?? "", child.line);
       const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
       if (codec === undefined || !codec.accepts(minLength)) {
-        throw new SchemaPlainSyntaxError("A string length must be a non-negative JSON integer", child.line);
+        throw new PlainTypeSyntaxError("A string length must be a non-negative JSON integer", child.line);
       }
       const expectedUnit = minLength.type === "number" && isMathematicalOne(minLength.raw)
         ? "character"
         : "characters";
       if (stringMatch[2] !== expectedUnit) {
-        throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, child.line);
+        throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, child.line);
       }
     }
     types.push(type);
@@ -1794,7 +1794,7 @@ function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     : arrayNode(types.map((value) => ({ type: "string", value })));
   const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "type");
   if (codec === undefined || !codec.accepts(typeValue)) {
-    throw new SchemaPlainSyntaxError("allowed types must list unique JSON Schema type names", bullet.line);
+    throw new PlainTypeSyntaxError("allowed types must list unique JSON Schema type names", bullet.line);
   }
   return [
     { key: "type", value: typeValue },
@@ -1806,7 +1806,7 @@ function parsePropertyName(source: string, line: number): string {
   if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(source)) return source;
   const parsed = parseEmbeddedJson(source, line);
   if (parsed.type !== "string") {
-    throw new SchemaPlainSyntaxError("A property name must be a bare safe name or JSON string", line);
+    throw new PlainTypeSyntaxError("A property name must be a bare safe name or JSON string", line);
   }
   return parsed.value;
 }
@@ -1815,7 +1815,7 @@ function schemaMapFromBullet(bullet: Bullet, codec: SchemaMapCodec): JsonObject 
   const entries = bullet.children.map((child): JsonObjectEntry => {
     const prefix = `${codec.itemLabel} `;
     if (!child.text.startsWith(prefix) || !child.text.endsWith(":")) {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         `Expected '${codec.itemLabel} <JSON string>:'`,
         child.line,
       );
@@ -1823,10 +1823,10 @@ function schemaMapFromBullet(bullet: Bullet, codec: SchemaMapCodec): JsonObject 
     const rawName = child.text.slice(prefix.length, -1);
     const name = parseEmbeddedJson(rawName, child.line);
     if (name.type !== "string") {
-      throw new SchemaPlainSyntaxError(`${codec.itemLabel} names must be JSON strings`, child.line);
+      throw new PlainTypeSyntaxError(`${codec.itemLabel} names must be JSON strings`, child.line);
     }
     if (child.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${codec.itemLabel} ${jsonString(name.value)} needs a nested schema`, child.line);
+      throw new PlainTypeSyntaxError(`${codec.itemLabel} ${jsonString(name.value)} needs a nested schema`, child.line);
     }
     return { key: name.value, value: schemaFromBullets(child.children) };
   });
@@ -1837,10 +1837,10 @@ function schemaArrayFromBullet(bullet: Bullet, codec: SchemaArrayCodec): JsonNod
   const items = bullet.children.map((child, index): JsonNode => {
     const expected = `${codec.itemLabel} ${index + 1}:`;
     if (child.text !== expected) {
-      throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, child.line);
+      throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, child.line);
     }
     if (child.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${expected.slice(0, -1)} needs a nested schema`, child.line);
+      throw new PlainTypeSyntaxError(`${expected.slice(0, -1)} needs a nested schema`, child.line);
     }
     return schemaFromBullets(child.children);
   });
@@ -1858,13 +1858,13 @@ function parseEmbeddedJson(source: string, line: number): JsonNode {
     return parseJson(source);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new SchemaPlainSyntaxError(`Invalid embedded JSON: ${message}`, line);
+    throw new PlainTypeSyntaxError(`Invalid embedded JSON: ${message}`, line);
   }
 }
 
 function requireNoChildren(bullet: Bullet): void {
   if (bullet.children.length !== 0) {
-    throw new SchemaPlainSyntaxError("This clause cannot contain nested clauses", bullet.children[0]?.line ?? bullet.line);
+    throw new PlainTypeSyntaxError("This clause cannot contain nested clauses", bullet.children[0]?.line ?? bullet.line);
   }
 }
 

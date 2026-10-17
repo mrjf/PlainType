@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  formatSchemaPlain,
+  formatPlainType,
   fromJsonSchema,
   parseJson,
   toJsonSchema,
 } from "../src/index.js";
 
-const HEADER_V1 = "***schemaplain 1***";
-const HEADER_V2 = "***schemaplain 2***";
+const HEADER_V1 = "***plaintype 1***";
+const HEADER_V2 = "***plaintype 2***";
 
 function assertV2RoundTrip(json: string): string {
   const plain = fromJsonSchema(json, { style: "conversational" });
   assert.deepEqual(parseJson(toJsonSchema(plain)), parseJson(json));
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
   return plain;
 }
 
@@ -144,7 +144,7 @@ test("an authored v2 object uses required and closed as its defaults", () => {
   }`;
 
   assert.deepEqual(parseJson(toJsonSchema(authored)), parseJson(expected));
-  assert.equal(formatSchemaPlain(authored), authored);
+  assert.equal(formatPlainType(authored), authored);
 });
 
 test("v2 objects default implicitly and named schemas compile to local references", () => {
@@ -206,7 +206,7 @@ test("v2 objects default implicitly and named schemas compile to local reference
 
   assert.deepEqual(parseJson(toJsonSchema(plain)), parseJson(json));
   assert.equal(fromJsonSchema(json, { style: "conversational" }), plain);
-  assert.equal(formatSchemaPlain(plain), plain);
+  assert.equal(formatPlainType(plain), plain);
 });
 
 test("v2 rejects unresolved named schemas and canonicalizes legacy object qualifiers", () => {
@@ -240,7 +240,7 @@ test("v2 rejects unresolved named schemas and canonicalizes legacy object qualif
   - owner (optional, object): Its owner.
 `;
   assert.equal(
-    formatSchemaPlain(legacy),
+    formatPlainType(legacy),
     `${HEADER_V2}\n\n- Animal: An animal.\n  - owner (optional): Its owner.\n`,
   );
 });
@@ -461,7 +461,7 @@ test("v2 preserves friendly raw numeric spellings and falls back for unsupported
 
   const unsupported = String.raw`{"title":"OutOfOrder","type":"object","description":"A fallback.","properties":{"name":{"description":"A name","minLength":1.00,"type":"string"}},"required":["name"],"additionalProperties":false}`;
   const fallback = assertV2RoundTrip(unsupported);
-  assert.match(fallback, /^\*\*\*schemaplain 2\*\*\*\n\n- Exact JSON Schema: /);
+  assert.match(fallback, /^\*\*\*plaintype 2\*\*\*\n\n- Exact JSON Schema: /);
   assert.ok(fallback.includes('"minLength":1.00,"type":"string"'));
 });
 
@@ -480,7 +480,7 @@ test("v2 uses exact whole-schema fallback for shapes compact syntax cannot prese
 
   for (const source of fixtures) {
     const plain = assertV2RoundTrip(source);
-    assert.match(plain, /^\*\*\*schemaplain 2\*\*\*\n\n- Exact JSON Schema: /);
+    assert.match(plain, /^\*\*\*plaintype 2\*\*\*\n\n- Exact JSON Schema: /);
   }
 });
 
@@ -506,14 +506,14 @@ test("v1 parsing and formatting retain v1 optional-by-default semantics", () => 
     parseJson(toJsonSchema(required)),
     parseJson('{"properties":{"name":{"type":"string"}},"required":["name"]}'),
   );
-  const formattedOptional = formatSchemaPlain(optional);
-  const formattedRequired = formatSchemaPlain(required);
+  const formattedOptional = formatPlainType(optional);
+  const formattedRequired = formatPlainType(required);
   assert.ok(formattedOptional.startsWith(`${HEADER_V1}\n`));
   assert.ok(formattedRequired.startsWith(`${HEADER_V1}\n`));
   assert.deepEqual(parseJson(toJsonSchema(formattedOptional)), parseJson(toJsonSchema(optional)));
   assert.deepEqual(parseJson(toJsonSchema(formattedRequired)), parseJson(toJsonSchema(required)));
-  assert.equal(formatSchemaPlain(formattedOptional), formattedOptional);
-  assert.equal(formatSchemaPlain(formattedRequired), formattedRequired);
+  assert.equal(formatPlainType(formattedOptional), formattedOptional);
+  assert.equal(formatPlainType(formattedRequired), formattedRequired);
   assert.ok(fromJsonSchema('{"type":"string"}').startsWith(`${HEADER_V1}\n`));
 });
 

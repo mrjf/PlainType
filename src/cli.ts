@@ -3,21 +3,21 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { stdin, stdout } from "node:process";
 import {
-  formatSchemaPlain,
+  formatPlainType,
   fromJsonSchema,
-  parseSchemaPlain,
+  parsePlainType,
   toJsonSchema,
   type FromJsonOptions,
   type RenderStyle,
 } from "./index.js";
 
-const USAGE = `SchemaPlain — lossless controlled English for JSON Schema
+const USAGE = `PlainType — lossless controlled English for JSON Schema
 
 Usage:
-  schemaplain from-json [input.json] [-o output.schema] [--style structured|conversational] [--dialect URI|none]
-  schemaplain to-json [input.schema] [-o output.json] [--compact]
-  schemaplain format [input.schema] [-o output.schema] [--style structured|conversational] [--dialect URI|none]
-  schemaplain check [input.schema]
+  plaintype from-json [input.json] [-o output.schema] [--style structured|conversational] [--dialect URI|none]
+  plaintype to-json [input.schema] [-o output.json] [--compact]
+  plaintype format [input.schema] [-o output.schema] [--style structured|conversational] [--dialect URI|none]
+  plaintype check [input.schema]
 
 Use '-' or omit the input path to read standard input. Output defaults to
 standard output. A schema without a $schema declaration is described as Draft
@@ -53,11 +53,11 @@ async function main(): Promise<void> {
       result = toJsonSchema(source, { space: options.compact ? 0 : 2 });
       break;
     case "format":
-      result = formatSchemaPlain(source, renderOptions);
+      result = formatPlainType(source, renderOptions);
       break;
     case "check":
-      parseSchemaPlain(source);
-      result = "SchemaPlain is valid.\n";
+      parsePlainType(source);
+      result = "PlainType is valid.\n";
       break;
   }
 
@@ -169,6 +169,6 @@ function fail(message: string): never {
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`schemaplain: ${message}\n`);
+  process.stderr.write(`plaintype: ${message}\n`);
   process.exitCode = 1;
 });

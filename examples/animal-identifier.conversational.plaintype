@@ -1,4 +1,4 @@
-***schemaplain 2***
+***plaintype 2***
 
 - AnimalIdentifier: An identifier attached to an animal. Exactly one of:
   - Microchip: Identification using an implanted microchip.
