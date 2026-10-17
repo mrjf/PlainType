@@ -1,0 +1,88 @@
+{
+  "title": "AnimalIdentifier",
+  "description": "An identifier attached to an animal.",
+  "oneOf": [
+    {
+      "title": "Microchip",
+      "type": "object",
+      "description": "Identification using an implanted microchip.",
+      "properties": {
+        "kind": {
+          "description": "The identifier kind",
+          "const": "microchip"
+        },
+        "number": {
+          "description": "The microchip number",
+          "type": "string",
+          "pattern": "^[0-9]{15}$"
+        },
+        "implantedOn": {
+          "description": "The implantation date",
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "required": [
+        "kind",
+        "number"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "title": "CollarTag",
+      "type": "object",
+      "description": "Identification using a collar tag.",
+      "properties": {
+        "kind": {
+          "description": "The identifier kind",
+          "const": "collar-tag"
+        },
+        "text": {
+          "description": "The text printed on the tag",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "phone": {
+          "description": "A contact phone number",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "additionalProperties": true
+    },
+    {
+      "title": "WildlifeBand",
+      "type": "object",
+      "description": "Identification using a research band.",
+      "properties": {
+        "kind": {
+          "description": "The identifier kind",
+          "const": "wildlife-band"
+        },
+        "bandId": {
+          "description": "The band identifier",
+          "type": "string",
+          "minLength": 1
+        },
+        "organization": {
+          "description": "The responsible organization",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "bandId",
+        "organization"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

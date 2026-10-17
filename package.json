@@ -1,0 +1,41 @@
+{
+  "name": "schemaplain",
+  "version": "0.1.0",
+  "description": "A controlled-natural-language notation that round-trips losslessly with JSON Schema",
+  "type": "module",
+  "bin": {
+    "schemaplain": "./dist/src/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist/src",
+    "README.md",
+    "docs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "verify:suite": "npm run build && node dist/scripts/verify-suite.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "json-schema",
+    "schema",
+    "dsl",
+    "round-trip"
+  ],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "typescript": "^7.0.2"
+  }
+}

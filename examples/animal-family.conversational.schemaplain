@@ -1,0 +1,12 @@
+***schemaplain 2***
+
+- AnimalFamily: A family tree for an animal.
+  - animal: The animal represented here - an Animal.
+  - parents (optional): Its known parents - an array of Animal.
+  - offspring (optional): Its known offspring - an array of AnimalFamily.
+
+  - Definitions:
+    - Animal: A reusable animal record.
+      - id: The animal identifier - a UUID string.
+      - name: The animal's name - a string containing at least one character.
+      - species: The species - a string containing at least one character.

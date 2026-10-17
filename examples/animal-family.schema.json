@@ -1,0 +1,58 @@
+{
+  "title": "AnimalFamily",
+  "type": "object",
+  "description": "A family tree for an animal.",
+  "properties": {
+    "animal": {
+      "description": "The animal represented here",
+      "$ref": "#/$defs/Animal"
+    },
+    "parents": {
+      "description": "Its known parents",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Animal"
+      }
+    },
+    "offspring": {
+      "description": "Its known offspring",
+      "type": "array",
+      "items": {
+        "$ref": "#"
+      }
+    }
+  },
+  "required": [
+    "animal"
+  ],
+  "$defs": {
+    "Animal": {
+      "type": "object",
+      "description": "A reusable animal record.",
+      "properties": {
+        "id": {
+          "description": "The animal identifier",
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "description": "The animal's name",
+          "type": "string",
+          "minLength": 1
+        },
+        "species": {
+          "description": "The species",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "species"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

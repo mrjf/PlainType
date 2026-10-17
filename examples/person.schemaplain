@@ -1,0 +1,20 @@
+***schemaplain 1***
+
+- It declares JSON Schema dialect "https://json-schema.org/draft/2020-12/schema".
+- Its identifier is "https://example.test/person".
+- Its title is "Person".
+# A person record.
+- Its allowed type or types are "object".
+- Properties:
+  - name (required):
+    # The person's full name.
+    - allowed types:
+      - string (must contain at least 1 character)
+      - null
+  - age:
+    - allowed types:
+      - integer
+    - A numeric instance must be at least 0.
+- Its additional-property schema is:
+  - No instance is accepted.
+- Its exact JSON Schema entry is ["x-owner",{"team":"identity"}].
