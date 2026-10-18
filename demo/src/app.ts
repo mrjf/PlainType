@@ -2,12 +2,14 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
-import { TranslateRequestSchema } from "./schemas.js";
+import type { Heal } from "./heal.js";
+import { HealRequestSchema, TranslateRequestSchema } from "./schemas.js";
 import type { Translate } from "./translate.js";
 
 export interface AppDeps {
   /** Null when no Anthropic credentials are configured. */
   readonly translate: Translate | null;
+  readonly heal: Heal | null;
   readonly model: string;
 }
 
@@ -29,6 +31,21 @@ export function createApp(deps: AppDeps) {
         }
         const result = await deps.translate(c.req.valid("json"), c.req.raw.signal);
         return c.json(result);
+      },
+    )
+    .post(
+      "/api/heal",
+      zValidator("json", HealRequestSchema, (result, c) => {
+        if (!result.success) return c.json({ error: "invalid_request", message: result.error.message }, 400);
+        return undefined;
+      }),
+      async (c) => {
+        if (deps.heal === null) {
+          throw new HTTPException(503, {
+            message: "No Anthropic credentials. Set ANTHROPIC_API_KEY and restart the server so the model can repair PlainType.",
+          });
+        }
+        return c.json(await deps.heal(c.req.valid("json"), c.req.raw.signal));
       },
     )
     .notFound((c) => c.json({ error: "not_found" }, 404))

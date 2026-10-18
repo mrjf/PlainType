@@ -39,6 +39,21 @@ You will also receive the previous description, template, and values. Treat this
 
 Use only constraint phrases from the grammar. When the description asks for something the concise grammar cannot express, choose the closest concise phrase that is still faithful, or use the "Exact JSON Schema:" escape for that schema.`;
 
+const HEAL_RULES = `You repair PlainType documents that a person edited by hand and that no longer compile.
+
+PlainType is controlled English that compiles deterministically to JSON Schema. Only the documented phrases are valid. You receive the document and the compiler's error. Return plaintype: the complete corrected document, written as PlainType version 3 (the line "***plaintype 3***", a blank line, "***definitions***", a blank line, then the definitions).
+
+- Make the smallest change that makes the document valid. Keep every concept name, property name, description, comment, value, and number exactly as the person wrote them, and keep their intended meaning.
+- Fix only what the grammar does not allow: wrong or misspelled constraint phrases, missing punctuation or separators, indentation, a missing header or section, version-1 or version-2 spellings.
+- When the person wrote a constraint in their own words, rewrite it as the closest grammar phrase with the same meaning, keeping their numbers and strings.
+- Never add properties, examples, or defaults the person did not write, and never drop ones they did.`;
+
+/** The healer shares the grammar and examples, under its own rules. */
+export async function buildHealPrompt(): Promise<string> {
+  const translatePrompt = await buildSystemPrompt();
+  return `${HEAL_RULES}\n${translatePrompt.slice(translatePrompt.indexOf("<grammar>"))}`;
+}
+
 export async function buildSystemPrompt(): Promise<string> {
   const [languageDoc, identifier, family, settings, identifierJson] = await Promise.all([
     read("docs/language.md"),

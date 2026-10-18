@@ -7,13 +7,24 @@ A local demo server with six synced panes:
 | Natural language | A free-form description | Sent to a small Claude model after a short pause |
 | Template | PlainType version 3 (***plain syntax) with `{{slot}}` placeholders | Applied instantly |
 | Value registry | Slot name → value | Applied instantly to every pane |
-| Raw PlainType | The template with values filled in | Read-only |
-| Formatted PlainType | Canonical `formatPlainType` output, syntax highlighted | Read-only |
+| Raw PlainType | The template with values filled in | Applied instantly; the model repairs text that stops compiling |
+| Formatted PlainType | A reader view of the canonical `formatPlainType` output | Read-only |
 | JSON Schema | What `toJsonSchema` compiles the raw PlainType to | Read-only |
 
-Each slot has its own color, and hovering it (or putting the caret on it)
-lights up the same slot in every pane. That includes the words in the
-natural-language text that became PlainType tokens.
+Each slot has its own color. In the editing panes it shows as a thin
+underline; hovering a slot, putting the caret on it, or editing it in the
+registry fills it in every pane, including the words in the natural-language
+text that became PlainType tokens. The formatted pane is what an app would
+show: no header or section markers, bold definitions, italic comments, and
+no slot color until you hover or edit one.
+
+Editing the raw PlainType maps back onto the state without the model
+(`shared/raw-edit.ts`). Typing inside a value updates that slot in the
+registry; typing anywhere else edits the template. If the edit stops
+compiling, the model gets the text and the compiler error after a short pause
+and returns a corrected document, which the server checks and formats
+canonically (`src/heal.ts`). The values are then found again in the repaired
+text, so the slots survive the repair.
 
 ## Run
 

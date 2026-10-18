@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export { DemoStateSchema, TranslateRequestSchema, type TranslateRequest } from "../shared/api.js";
+export {
+  DemoStateSchema,
+  HealRequestSchema,
+  TranslateRequestSchema,
+  type HealRequest,
+  type TranslateRequest,
+} from "../shared/api.js";
 
 /** What the model returns; the server derives the natural-language template itself. */
 export const ModelOutputSchema = z.object({
@@ -9,3 +15,8 @@ export const ModelOutputSchema = z.object({
 });
 
 export type ModelOutput = z.infer<typeof ModelOutputSchema>;
+
+/** What the healer returns: the complete corrected document. */
+export const HealOutputSchema = z.object({ plaintype: z.string() });
+
+export type HealOutput = z.infer<typeof HealOutputSchema>;

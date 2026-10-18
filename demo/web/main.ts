@@ -1,27 +1,42 @@
 /**
  * PlainType Studio client.
  *
- * All panes are pure renders of `state`. Registry and template edits update
- * `state` directly and re-render synchronously. Free-form natural-language
- * edits mark the text dirty and, after a short pause, ask the server (and the
- * model behind it) for a new state; only the newest answer is ever applied.
+ * All panes are pure renders of `state`. Registry, template, and raw
+ * PlainType edits update `state` directly and re-render synchronously. Free-form
+ * natural-language edits mark the text dirty and, after a short pause, ask the
+ * server (and the model behind it) for a new state. A raw edit that stops
+ * compiling is sent to the model to be healed. Only the newest answer to either
+ * request is ever applied.
  */
 
-import { ErrorResponseSchema, HealthSchema, DemoStateSchema, TranslateResponseSchema, type TranslateResponse } from "../shared/api.js";
+import {
+  DemoStateSchema,
+  ErrorResponseSchema,
+  HealResponseSchema,
+  HealthSchema,
+  TranslateResponseSchema,
+  type HealResponse,
+  type TranslateResponse,
+} from "../shared/api.js";
 import { highlight } from "../shared/highlight.js";
+import { applyRawEdit, rawSlotOrder, templateFromRaw } from "../shared/raw-edit.js";
 import { placeholderSpans, slotNames } from "../shared/slots.js";
 import { SEED, derive, pruneValues, slotAt, type DemoState, type DerivedView } from "../shared/state.js";
 import { escapeHtml, paint, slotHue } from "./paint.js";
+import { renderReader } from "./reader.js";
 
 type Phase =
   | { readonly kind: "synced" }
   | { readonly kind: "typing" }
   | { readonly kind: "thinking" }
+  | { readonly kind: "healing" }
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "offline" };
 
 const STORAGE_KEY = "plaintype-studio-state-v4";
 const DEBOUNCE_MS = 450;
+/** Give a person time to finish a hand edit before asking the model to repair it. */
+const HEAL_DEBOUNCE_MS = 1200;
 
 function byId<T extends HTMLElement>(id: string, type: new () => T): T {
   const element = document.getElementById(id);
@@ -43,8 +58,10 @@ const ui = {
   template: byId("template", HTMLTextAreaElement),
   templateBackdrop: byId("template-backdrop", HTMLPreElement),
   registry: byId("registry", HTMLTableSectionElement),
-  raw: byId("raw", HTMLPreElement),
-  formatted: byId("formatted", HTMLPreElement),
+  raw: byId("raw", HTMLTextAreaElement),
+  rawBackdrop: byId("raw-backdrop", HTMLPreElement),
+  rawNotes: byId("raw-notes", HTMLElement),
+  formatted: byId("formatted", HTMLDivElement),
   json: byId("json", HTMLPreElement),
   compileBadge: byId("compile-badge", HTMLSpanElement),
 };
@@ -60,6 +77,9 @@ let activeSlot: string | null = null;
 let natEdited = false;
 let inflight: AbortController | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+let lastHeal: HealResponse | null = null;
+let healInflight: AbortController | null = null;
+let healTimer: ReturnType<typeof setTimeout> | undefined;
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -70,6 +90,12 @@ function renderAll(): void {
 
   if (!dirty && ui.nat.value !== view.natlang.text) ui.nat.value = view.natlang.text;
   if (document.activeElement !== ui.template && ui.template.value !== state.ptTemplate) ui.template.value = state.ptTemplate;
+  if (ui.raw.value !== view.raw.text) {
+    // A value edit can also change the slot's other uses; keep the caret where it was.
+    const caret = ui.raw.selectionStart;
+    ui.raw.value = view.raw.text;
+    if (document.activeElement === ui.raw) ui.raw.setSelectionRange(caret, caret);
+  }
 
   renderNatlang();
   renderTemplate();
@@ -116,22 +142,39 @@ function renderTemplate(): void {
 }
 
 function renderOutputs(): void {
-  ui.raw.innerHTML = paint(view.raw.text, { slots: view.raw.spans });
+  ui.rawBackdrop.innerHTML = paint(view.raw.text, { slots: view.raw.spans });
+  syncScroll(ui.raw, ui.rawBackdrop);
+  ui.rawNotes.innerHTML = rawNotes();
   const compiled = view.compiled;
   if (compiled.ok) {
-    ui.formatted.innerHTML = paint(compiled.formatted, { tokens: highlight(compiled.formatted), slots: compiled.formattedSpans });
+    ui.formatted.innerHTML = renderReader(compiled.formatted, compiled.formattedSpans);
     ui.json.textContent = compiled.json;
     ui.compileBadge.textContent = compiled.formatted === view.raw.text ? "✓ compiles · canonical" : "✓ compiles";
     ui.compileBadge.className = "badge ok";
   } else {
-    ui.formatted.innerHTML = `<span class="error-line">${escapeHtml(compiled.error)}</span>${paint(view.raw.text, {
+    ui.formatted.innerHTML = `<p class="error-line">${escapeHtml(compiled.error)}</p><pre class="code-fallback">${paint(view.raw.text, {
       tokens: highlight(view.raw.text),
       slots: view.raw.spans,
-    })}`;
+    })}</pre>`;
     ui.json.textContent = "—";
     ui.compileBadge.textContent = compiled.line === null ? "✗ error" : `✗ line ${compiled.line}`;
     ui.compileBadge.className = "badge err";
   }
+}
+
+function rawNotes(): string {
+  if (phase.kind === "healing") return "Repairing with the model…";
+  if (!view.compiled.ok) {
+    return aiAvailable
+      ? `<span class="warn">Does not compile.</span> The model will repair it when you pause.`
+      : `<span class="warn">Does not compile.</span> Repair needs ANTHROPIC_API_KEY on the server.`;
+  }
+  if (lastHeal) {
+    return lastHeal.compileError === null
+      ? `Repaired by ${escapeHtml(lastHeal.model)} in ${lastHeal.ms} ms.`
+      : `<span class="warn">The model could not repair it:</span> ${escapeHtml(lastHeal.compileError)}`;
+  }
+  return "";
 }
 
 const registryRows = new Map<string, { row: HTMLTableRowElement; input: HTMLInputElement; used: HTMLDivElement }>();
@@ -193,6 +236,8 @@ function renderStatus(): void {
     document.getElementById(pane)?.classList.toggle("stale", dirty);
   }
   ui.template.readOnly = dirty || phase.kind === "thinking";
+  ui.raw.readOnly = dirty || phase.kind === "thinking";
+  document.body.toggleAttribute("data-busy", phase.kind === "thinking" || phase.kind === "healing");
   switch (phase.kind) {
     case "synced":
       ui.statusText.textContent = "In sync";
@@ -208,13 +253,17 @@ function renderStatus(): void {
       ui.statusText.textContent = `Asking ${model}…`;
       ui.statusMeta.textContent = "";
       break;
+    case "healing":
+      ui.statusText.textContent = `Repairing PlainType with ${model}…`;
+      ui.statusMeta.textContent = "";
+      break;
     case "error":
       ui.statusText.textContent = phase.message;
       ui.statusMeta.textContent = "";
       break;
     case "offline":
-      ui.statusText.textContent = "AI off: natural-language edits need ANTHROPIC_API_KEY on the server";
-      ui.statusMeta.textContent = "registry & template edits still work";
+      ui.statusText.textContent = "Model off: set ANTHROPIC_API_KEY on the server for natural-language edits and repairs";
+      ui.statusMeta.textContent = "registry, template and raw edits still work";
       break;
   }
 }
@@ -241,11 +290,71 @@ function setTemplate(text: string): void {
   renderAll();
 }
 
+function onRawInput(): void {
+  cancelHeal();
+  state = applyRawEdit(state, ui.raw.value);
+  lastHeal = null;
+  if (phase.kind === "healing" || phase.kind === "error") phase = aiAvailable ? { kind: "synced" } : { kind: "offline" };
+  renderAll();
+  if (!view.compiled.ok && aiAvailable) healTimer = setTimeout(() => void heal(), HEAL_DEBOUNCE_MS);
+}
+
+function cancelHeal(): void {
+  clearTimeout(healTimer);
+  healInflight?.abort();
+  healInflight = null;
+}
+
+// ---------------------------------------------------------------------------
+// Raw PlainType that stops compiling is healed by the model
+
+async function heal(): Promise<void> {
+  const raw = ui.raw.value;
+  const compiled = view.compiled;
+  if (compiled.ok) return;
+  const controller = new AbortController();
+  healInflight = controller;
+  phase = { kind: "healing" };
+  renderAll();
+  try {
+    const response = await fetch("/api/heal", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ raw, error: compiled.error }),
+      signal: controller.signal,
+    });
+    const body: unknown = await response.json();
+    if (healInflight !== controller || ui.raw.value !== raw) return; // superseded
+    if (!response.ok) {
+      const error = ErrorResponseSchema.safeParse(body);
+      phase = { kind: "error", message: error.success ? error.data.message ?? error.data.error : `HTTP ${response.status}` };
+      if (response.status === 503) aiAvailable = false;
+      return;
+    }
+    const result = HealResponseSchema.parse(body);
+    lastHeal = result;
+    if (result.compileError === null) {
+      // Values stay in the registry; find each one again in the repaired text.
+      state = { ...state, ptTemplate: templateFromRaw(result.raw, rawSlotOrder(state)) };
+    }
+    phase = { kind: "synced" };
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    phase = { kind: "error", message: error instanceof Error ? error.message : "Request failed" };
+  } finally {
+    if (healInflight === controller) {
+      healInflight = null;
+      renderAll();
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Natural-language edits go to the model
 
 function onNatInput(): void {
   natEdited = true;
+  cancelHeal();
   clearTimeout(debounceTimer);
   inflight?.abort();
   inflight = null;
@@ -339,6 +448,7 @@ function slotUnderPointer(event: MouseEvent): string | null {
 function slotAtCaret(textarea: HTMLTextAreaElement): string | null {
   const caret = textarea.selectionStart;
   if (textarea === ui.nat) return isNatDirty() ? null : slotAt(view.natDoc, caret);
+  if (textarea === ui.raw) return slotAt(view.rawDoc, caret);
   return placeholderSpans(textarea.value).find((span) => span.start <= caret && caret <= span.end)?.slot ?? null;
 }
 
@@ -347,14 +457,15 @@ function slotAtCaret(textarea: HTMLTextAreaElement): string | null {
 
 ui.nat.addEventListener("input", onNatInput);
 ui.template.addEventListener("input", () => setTemplate(ui.template.value));
-for (const [textarea, backdrop] of [[ui.nat, ui.natBackdrop], [ui.template, ui.templateBackdrop]] as const) {
+ui.raw.addEventListener("input", onRawInput);
+for (const [textarea, backdrop] of [[ui.nat, ui.natBackdrop], [ui.template, ui.templateBackdrop], [ui.raw, ui.rawBackdrop]] as const) {
   textarea.addEventListener("scroll", () => syncScroll(textarea, backdrop));
   textarea.addEventListener("mousemove", (event) => setActive(slotUnderPointer(event) ?? (document.activeElement === textarea ? slotAtCaret(textarea) : null)));
   textarea.addEventListener("mouseleave", () => setActive(document.activeElement === textarea ? slotAtCaret(textarea) : null));
   for (const type of ["keyup", "click", "focus"] as const) textarea.addEventListener(type, () => setActive(slotAtCaret(textarea)));
   textarea.addEventListener("blur", () => setActive(null));
 }
-for (const pane of [ui.raw, ui.formatted, ui.registry]) {
+for (const pane of [ui.formatted, ui.registry]) {
   pane.addEventListener("mouseover", (event) => {
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-slot]") : null;
     if (target) setActive(target.dataset["slot"] ?? null);
@@ -372,13 +483,15 @@ ui.registry.addEventListener("click", (event) => {
   state = { ...state, values };
   renderAll();
 });
-ui.retry.addEventListener("click", () => void translate());
+ui.retry.addEventListener("click", () => void (isNatDirty() ? translate() : heal()));
 ui.revert.addEventListener("click", revertNatlang);
 ui.reset.addEventListener("click", () => {
   inflight?.abort();
   inflight = null;
+  cancelHeal();
   state = SEED;
   lastResult = null;
+  lastHeal = null;
   natEdited = false;
   ui.template.value = SEED.ptTemplate;
   phase = aiAvailable ? { kind: "synced" } : { kind: "offline" };

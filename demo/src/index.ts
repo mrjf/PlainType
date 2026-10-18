@@ -2,21 +2,22 @@ import Anthropic from "@anthropic-ai/sdk";
 import homepage from "../web/index.html";
 import { createApp } from "./app.js";
 import { aiConfigured, env } from "./env.js";
-import { buildSystemPrompt } from "./prompt.js";
-import { anthropicModelCall, createTranslator } from "./translate.js";
+import { createHealer } from "./heal.js";
+import { buildHealPrompt, buildSystemPrompt } from "./prompt.js";
+import { HealOutputSchema } from "./schemas.js";
+import { anthropicModelCall, anthropicStructuredCall, createTranslator } from "./translate.js";
 
-const translate = aiConfigured
-  ? createTranslator(
-      anthropicModelCall({
-        client: new Anthropic({ timeout: 60_000, maxRetries: 1 }),
-        systemPrompt: await buildSystemPrompt(),
-        model: env.PLAINTYPE_MODEL,
-        effort: env.PLAINTYPE_EFFORT,
-      }),
-    )
+const client = aiConfigured ? new Anthropic({ timeout: 60_000, maxRetries: 1 }) : null;
+const callOptions = { model: env.PLAINTYPE_MODEL, effort: env.PLAINTYPE_EFFORT };
+
+const translate = client
+  ? createTranslator(anthropicModelCall({ client, systemPrompt: await buildSystemPrompt(), ...callOptions }))
+  : null;
+const heal = client
+  ? createHealer(anthropicStructuredCall({ client, systemPrompt: await buildHealPrompt(), ...callOptions }, HealOutputSchema))
   : null;
 
-const app = createApp({ translate, model: env.PLAINTYPE_MODEL });
+const app = createApp({ translate, heal, model: env.PLAINTYPE_MODEL });
 
 const server = Bun.serve({
   port: env.PORT,

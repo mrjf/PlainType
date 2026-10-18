@@ -31,3 +31,21 @@ export type TranslateResponse = z.infer<typeof TranslateResponseSchema>;
 export const ErrorResponseSchema = z.object({ error: z.string(), message: z.string().optional() });
 
 export const HealthSchema = z.object({ ok: z.boolean(), ai: z.boolean(), model: z.string() });
+
+export const HealRequestSchema = z.object({
+  raw: z.string().min(1).max(40_000),
+  error: z.string().max(2_000).optional(),
+});
+
+export type HealRequest = z.infer<typeof HealRequestSchema>;
+
+export const HealResponseSchema = z.object({
+  raw: z.string(),
+  compileError: z.string().nullable(),
+  attempts: z.number().int(),
+  model: z.string(),
+  ms: z.number(),
+  usage: z.object({ input: z.number(), output: z.number(), cacheRead: z.number() }),
+});
+
+export type HealResponse = z.infer<typeof HealResponseSchema>;

@@ -11,6 +11,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { HTTPException } from "hono/http-exception";
+import type { z } from "zod";
 import { compile, stateFromSlots, type DemoState } from "../shared/state.js";
 import { SLOT_NAME, render, slotNames, type SlotValue } from "../shared/slots.js";
 import { ModelOutputSchema, type ModelOutput, type TranslateRequest } from "./schemas.js";
@@ -29,9 +30,9 @@ export interface TranslateResult {
 
 export type Translate = (request: TranslateRequest, signal?: AbortSignal) => Promise<TranslateResult>;
 
-/** One model turn, reduced to what the translator needs. */
-export interface ModelReply {
-  readonly output: ModelOutput | null;
+/** One model turn, reduced to what the translator and healer need. */
+export interface ModelReply<Output = ModelOutput> {
+  readonly output: Output | null;
   readonly stopReason: string | null;
   /** The assistant turn to append when asking for a correction. */
   readonly content: Anthropic.ContentBlockParam[];
@@ -39,7 +40,10 @@ export interface ModelReply {
   readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number };
 }
 
-export type ModelCall = (messages: readonly Anthropic.MessageParam[], signal?: AbortSignal) => Promise<ModelReply>;
+export type ModelCall<Output = ModelOutput> = (
+  messages: readonly Anthropic.MessageParam[],
+  signal?: AbortSignal,
+) => Promise<ModelReply<Output>>;
 
 export interface AnthropicCallOptions {
   readonly client: Anthropic;
@@ -49,7 +53,14 @@ export interface AnthropicCallOptions {
 }
 
 export function anthropicModelCall(options: AnthropicCallOptions): ModelCall {
-  const format = zodOutputFormat(ModelOutputSchema);
+  return anthropicStructuredCall(options, ModelOutputSchema);
+}
+
+export function anthropicStructuredCall<Schema extends z.ZodType>(
+  options: AnthropicCallOptions,
+  schema: Schema,
+): ModelCall<z.infer<Schema>> {
+  const format = zodOutputFormat(schema);
   return async (messages, signal) => {
     try {
       const response = await options.client.messages.parse(
