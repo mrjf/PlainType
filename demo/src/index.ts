@@ -1,10 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import homepage from "../web/index.html";
+import instancePage from "../web/instance.html";
 import { createApp } from "./app.js";
 import { aiConfigured, env } from "./env.js";
 import { createHealer } from "./heal.js";
-import { buildHealPrompt, buildSystemPrompt } from "./prompt.js";
-import { HealOutputSchema } from "./schemas.js";
+import { INSTANCE_LANGUAGE, createInstanceTranslator } from "./instance.js";
+import { buildHealPrompt, buildInstanceHealPrompt, buildInstancePrompt, buildSystemPrompt } from "./prompt.js";
+import { HealOutputSchema, InstanceModelOutputSchema } from "./schemas.js";
 import { anthropicModelCall, anthropicStructuredCall, createTranslator } from "./translate.js";
 
 const client = aiConfigured ? new Anthropic({ timeout: 60_000, maxRetries: 1 }) : null;
@@ -17,11 +19,23 @@ const heal = client
   ? createHealer(anthropicStructuredCall({ client, systemPrompt: await buildHealPrompt(), ...callOptions }, HealOutputSchema))
   : null;
 
-const app = createApp({ translate, heal, model: env.PLAINTYPE_MODEL });
+const instanceTranslate = client
+  ? createInstanceTranslator(
+      anthropicStructuredCall({ client, systemPrompt: await buildInstancePrompt(), ...callOptions }, InstanceModelOutputSchema),
+    )
+  : null;
+const instanceHeal = client
+  ? createHealer(
+      anthropicStructuredCall({ client, systemPrompt: await buildInstanceHealPrompt(), ...callOptions }, HealOutputSchema),
+      INSTANCE_LANGUAGE,
+    )
+  : null;
+
+const app = createApp({ translate, heal, instanceTranslate, instanceHeal, model: env.PLAINTYPE_MODEL });
 
 const server = Bun.serve({
   port: env.PORT,
-  routes: { "/": homepage },
+  routes: { "/": homepage, "/instance": instancePage },
   fetch: app.fetch,
   development: env.NODE_ENV === "development" ? { hmr: true, console: true } : false,
 });

@@ -163,3 +163,30 @@ function lastUnquotedDash(line: string, from: number): number {
   }
   return found;
 }
+
+/** PlainType data notation: header, comments, concept label, member keys, #n items, and JSON values. */
+export function highlightInstance(text: string): Token[] {
+  const tokens: Token[] = [];
+  let lineStart = 0;
+  for (const line of text.split("\n")) {
+    const push = (start: number, end: number, cls: TokenClass): void => {
+      if (end > start) tokens.push({ start: lineStart + start, end: lineStart + end, cls });
+    };
+    const indent = line.length - line.trimStart().length;
+    if (/^\*\*\*[a-z0-9 ]+\*\*\*$/.test(line)) push(0, line.length, "header");
+    else if (line.startsWith(">", indent)) push(indent, line.length, "comment");
+    else if (line.startsWith("- ", indent)) {
+      push(indent, indent + 1, "bullet");
+      const body = line.slice(indent + 2);
+      const head = /^(:[A-Za-z0-9+._-]+:|#[0-9]+|"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)/.exec(body);
+      const headEnd = indent + 2 + (head?.[0].length ?? 0);
+      if (head) push(indent + 2, headEnd, head[0].startsWith(":") ? "concept" : head[0].startsWith("#") ? "qualifier" : "name");
+      if (line.startsWith(" - ", headEnd)) {
+        push(headEnd + 1, headEnd + 2, "punct");
+        inline(line, headEnd + 3, line.length, push);
+      }
+    }
+    lineStart += line.length + 1;
+  }
+  return tokens;
+}

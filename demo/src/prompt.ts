@@ -94,3 +94,53 @@ export async function buildSystemPrompt(): Promise<string> {
     "</example>",
   ].join("\n");
 }
+
+const INSTANCE_NOTATION = `PlainType data notation (one JSON value, usually an object):
+
+***plaintype data 1***
+
+- :Button:
+  - label - "Buy now"
+  - priority - 2
+  - tags - ["sale","cta"]
+  - owner
+    - name - "Ada"
+  - history
+    - #1 - "created"
+    - #2
+      - at - "2026-10-19"
+
+- The first line is exactly "***plaintype data 1***", then a blank line, then one root bullet labelled with the schema's concept name, such as - :Button:.
+- A member is "key - <JSON value>", or a bare "key" whose indented children are its members or its numbered list items "#1", "#2", …
+- Values are strict JSON: strings in double quotes, numbers, true, false, null. Empty containers are written inline as {} and [].
+- Keys that are not simple identifiers are JSON strings: - "display name" - "Ada".
+- Indentation is two spaces per level. Lines starting with > are comments.`;
+
+const INSTANCE_RULES = `You write one instance of a data schema from a short natural-language description. The schema is given in PlainType (controlled English for JSON Schema); its grammar follows these rules. The instance is written in PlainType data notation, as a template with named slots.
+
+Output two things:
+
+1. instanceTemplate: a complete PlainType data document for the description. Wherever it contains a value the user stated, write a slot placeholder {{slotName}} instead: inside the quotes for strings ("{{label}}"), bare for numbers and booleans ({{priority}}).
+2. slots: one entry per placeholder, {"name": slotName, "value": the exact text}, in the order the values appear in the description. Copy each value character for character from the description. If a value cannot be copied verbatim (the text says "two" but the JSON needs 2), write it literally in the template instead of making it a slot.
+
+Use the schema's property names, nesting, and JSON types exactly. Include properties the description states; include required properties even when the description is silent, choosing a sensible value and writing it literally. Do not add properties the schema does not define. Keep the user's values even when they break a schema constraint; the user sees validation results.
+
+You also receive the previous description, template, and slots. Treat this as an edit: keep slot names and structure wherever the meaning is unchanged. Values ending in … are folded long strings: return them unchanged under the same slot name to keep their full text.`;
+
+const INSTANCE_HEAL_RULES = `You repair PlainType data documents that a person edited by hand and that no longer parse. You receive the document and the parser's error. Return plaintype: the complete corrected document.
+
+- Make the smallest change that makes the document parse. Keep every key, value, and comment exactly as written, including strings that end in … (they are folded long strings and must stay as they are).
+- Fix only notation: the header line, bullets, indentation, the " - " separator, list numbering, and JSON syntax such as missing quotes or trailing commas.
+- Never add or drop members.`;
+
+function grammarAndNotation(translatePrompt: string): string {
+  return `${INSTANCE_NOTATION}\n${translatePrompt.slice(translatePrompt.indexOf("<grammar>"))}`;
+}
+
+export async function buildInstancePrompt(): Promise<string> {
+  return `${INSTANCE_RULES}\n\n${grammarAndNotation(await buildSystemPrompt())}`;
+}
+
+export async function buildInstanceHealPrompt(): Promise<string> {
+  return `${INSTANCE_HEAL_RULES}\n\n${INSTANCE_NOTATION}`;
+}

@@ -26,6 +26,36 @@ and returns a corrected document, which the server checks and formats
 canonically (`src/heal.ts`). The values are then found again in the repaired
 text, so the slots survive the repair.
 
+## Instance Studio
+
+The **Instance** tab (`/instance`) is the same six-pane studio for one JSON
+record of the schema the Schema tab currently holds. Its PlainType-style
+notation for data (`shared/instance-notation.ts`) reads like this:
+
+```plain
+***plaintype data 1***
+
+- :Button:
+  - label - "Buy now"
+  - priority - 2
+  - owner
+    - name - "Ada"
+  - history
+    - #1 - "created"
+```
+
+Members are `key - <JSON>`, objects nest, and list items are numbered `#n`.
+Values are strict JSON, read with PlainType's lossless parser, so key order and
+number spellings survive. The Record pane is the reader view, and the JSON pane
+shows the value validated against the compiled schema with Ajv (draft 2020-12).
+Members that fail validation are flagged in the record.
+
+The studio is meant for small records. Long strings (over 48 characters) move
+into the registry as slots and are folded to `…` everywhere: in the raw editor
+(where they cannot be edited in place), the record (expandable), the JSON pane,
+and everything sent to the model. A slot the model hands back in its folded
+form gets its full value back.
+
 ## Run
 
 ```bash

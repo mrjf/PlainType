@@ -10,13 +10,23 @@
  * typed text, except where a value edit also changes the slot's other uses.
  */
 
-import { linkNatlang, lookup, placeholderSpans, render, type SlotSpan, type SlotValue } from "./slots.js";
+import { linkNatlang, lookup, placeholderSpans, render, type SlotSpan, type SlotValue, type Values } from "./slots.js";
 import type { DemoState } from "./state.js";
 
 export function applyRawEdit(state: DemoState, edited: string): DemoState {
-  const before = render(state.ptTemplate, state.values);
+  return applyDisplayedRawEdit(state, edited, state.values) ?? state;
+}
+
+/**
+ * The same mapping against raw text rendered with `display` values, where a
+ * slot whose display differs from its value (a folded long string) is atomic:
+ * an edit that touches it is refused (null), since its full text is not shown.
+ */
+export function applyDisplayedRawEdit(state: DemoState, edited: string, display: Values): DemoState | null {
+  const before = render(state.ptTemplate, display);
   const old = before.text;
   if (old === edited) return state;
+  const locked = (span: SlotSpan): boolean => lookup(display, span.slot) !== lookup(state.values, span.slot);
 
   const shortest = Math.min(old.length, edited.length);
   let prefix = 0;
@@ -28,6 +38,7 @@ export function applyRawEdit(state: DemoState, edited: string): DemoState {
   const inserted = edited.slice(start, edited.length - suffix);
 
   const host = before.spans.find((span) => span.start <= start && end <= span.end && !separatesFrom(span, start, end, inserted));
+  if (host !== undefined && locked(host)) return null;
   if (host !== undefined) {
     const value = edited.slice(host.start, host.end + edited.length - old.length);
     return { ...state, values: { ...state.values, [host.slot]: value } };
@@ -35,6 +46,7 @@ export function applyRawEdit(state: DemoState, edited: string): DemoState {
 
   for (const span of before.spans) {
     if (span.start < end && start < span.end) {
+      if (locked(span)) return null;
       start = Math.min(start, span.start);
       end = Math.max(end, span.end);
     }

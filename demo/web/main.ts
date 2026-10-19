@@ -10,7 +10,6 @@
  */
 
 import {
-  DemoStateSchema,
   ErrorResponseSchema,
   HealResponseSchema,
   HealthSchema,
@@ -20,6 +19,7 @@ import {
 } from "../shared/api.js";
 import { highlight } from "../shared/highlight.js";
 import { applyRawEdit, rawSlotOrder, templateFromRaw } from "../shared/raw-edit.js";
+import { SCHEMA_STORAGE_KEY, loadState, saveState } from "../shared/storage.js";
 import { placeholderSpans, slotNames } from "../shared/slots.js";
 import { SEED, derive, pruneValues, slotAt, type DemoState, type DerivedView } from "../shared/state.js";
 import { escapeHtml, paint, slotHue } from "./paint.js";
@@ -33,7 +33,6 @@ type Phase =
   | { readonly kind: "error"; readonly message: string }
   | { readonly kind: "offline" };
 
-const STORAGE_KEY = "plaintype-studio-state-v4";
 const DEBOUNCE_MS = 450;
 /** Give a person time to finish a hand edit before asking the model to repair it. */
 const HEAL_DEBOUNCE_MS = 1200;
@@ -66,7 +65,7 @@ const ui = {
   compileBadge: byId("compile-badge", HTMLSpanElement),
 };
 
-let state: DemoState = loadState() ?? SEED;
+let state: DemoState = loadState(SCHEMA_STORAGE_KEY) ?? SEED;
 let view: DerivedView = derive(state);
 let phase: Phase = { kind: "synced" };
 let aiAvailable = true;
@@ -103,7 +102,7 @@ function renderAll(): void {
   renderOutputs();
   renderStatus();
   applyActive();
-  saveState();
+  saveState(SCHEMA_STORAGE_KEY, state);
 }
 
 function isNatDirty(): boolean {
@@ -497,25 +496,6 @@ ui.reset.addEventListener("click", () => {
   phase = aiAvailable ? { kind: "synced" } : { kind: "offline" };
   renderAll();
 });
-
-function loadState(): DemoState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return null;
-    const parsed = DemoStateSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveState(): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Storage unavailable (private mode, blocked): the demo works without it.
-  }
-}
 
 async function checkHealth(): Promise<void> {
   try {

@@ -27,11 +27,33 @@ export interface HealResult {
 
 export type Heal = (request: HealRequest, signal?: AbortSignal) => Promise<HealResult>;
 
-export function createHealer(call: ModelCall<HealOutput>): Heal {
+/** What the healer needs to know about the notation it repairs. */
+export interface HealLanguage {
+  /** The parse error for a document, or null when it is valid. */
+  readonly check: (source: string) => string | null;
+  /** The canonical text of a valid document. */
+  readonly canonical: (source: string) => string;
+}
+
+export const PLAINTYPE_LANGUAGE: HealLanguage = {
+  check: (source) => errorOf(() => formatPlainType(source)),
+  canonical: (source) => formatPlainType(source, { style: "plain" }),
+};
+
+export function errorOf(attempt: () => unknown): string | null {
+  try {
+    attempt();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+export function createHealer(call: ModelCall<HealOutput>, language: HealLanguage = PLAINTYPE_LANGUAGE): Heal {
   return async (request, signal) => {
     const started = performance.now();
     const usage = { input: 0, output: 0, cacheRead: 0 };
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: healTurn(request.raw, request.error ?? compileError(request.raw)) }];
+    const messages: Anthropic.MessageParam[] = [{ role: "user", content: healTurn(request.raw, request.error ?? language.check(request.raw)) }];
 
     for (let attempt = 1; ; attempt += 1) {
       const reply = await call(messages, signal);
@@ -43,10 +65,10 @@ export function createHealer(call: ModelCall<HealOutput>): Heal {
       if (!reply.output) throw new HTTPException(502, { message: "The model returned no structured output." });
 
       const candidate = reply.output.plaintype;
-      const error = compileError(candidate);
+      const error = language.check(candidate);
       if (error === null || attempt >= MAX_ATTEMPTS) {
         return {
-          raw: error === null ? formatPlainType(candidate, { style: "plain" }) : candidate,
+          raw: error === null ? language.canonical(candidate) : candidate,
           compileError: error,
           attempts: attempt,
           model: reply.model,
@@ -60,15 +82,6 @@ export function createHealer(call: ModelCall<HealOutput>): Heal {
       );
     }
   };
-}
-
-function compileError(source: string): string | null {
-  try {
-    formatPlainType(source);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
 }
 
 function healTurn(raw: string, error: string | null): string {

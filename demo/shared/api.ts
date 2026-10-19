@@ -49,3 +49,17 @@ export const HealResponseSchema = z.object({
 });
 
 export type HealResponse = z.infer<typeof HealResponseSchema>;
+
+export const InstanceTranslateRequestSchema = z.object({
+  natlang: z.string().min(1).max(8_000),
+  previous: DemoStateSchema,
+  schema: z.object({
+    /** The schema as raw PlainType, which the model reads. */
+    plaintype: z.string().max(40_000),
+    /** The compiled JSON Schema, which the server validates against. */
+    json: z.string().max(80_000),
+    title: z.string().nullable(),
+  }),
+});
+
+export type InstanceTranslateRequest = z.infer<typeof InstanceTranslateRequestSchema>;
