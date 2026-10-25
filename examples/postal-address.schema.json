@@ -1,0 +1,40 @@
+{
+  "title": "PostalAddress",
+  "type": "object",
+  "description": "Where a person or place is, for post",
+  "properties": {
+    "street": {
+      "description": "The street and house number",
+      "type": "string",
+      "label": "sensitive"
+    },
+    "city": {
+      "description": "The city or town",
+      "type": "string",
+      "label": "sensitive"
+    },
+    "region": {
+      "description": "The state, province or county",
+      "type": "string",
+      "label": "sensitive"
+    },
+    "postcode": {
+      "description": "The postal code",
+      "type": "string",
+      "label": "sensitive"
+    },
+    "country": {
+      "description": "The country",
+      "type": "string",
+      "label": "sensitive"
+    }
+  },
+  "required": [
+    "street",
+    "city",
+    "region",
+    "postcode",
+    "country"
+  ],
+  "additionalProperties": false
+}

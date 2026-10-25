@@ -1,0 +1,10 @@
+***plaintype***
+
+***definitions***
+
+- :PostalAddress: Where a person or place is, for post
+  - street - The street and house number - a string. Sensitive.
+  - city - The city or town - a string. Sensitive.
+  - region - The state, province or county - a string. Sensitive.
+  - postcode - The postal code - a string. Sensitive.
+  - country - The country - a string. Sensitive.

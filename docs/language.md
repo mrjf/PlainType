@@ -435,8 +435,13 @@ and [`animal-family.schema.json`](../examples/animal-family.schema.json).
 Version 3 carries exactly the version-2 declaration model, but spells it with
 the conventions of the [***plain](https://plainlang.org/docs/language-guide/basic-syntax)
 specification language, so a PlainType file reads like a ***plain
-`***definitions***` section. It adds two annotation sentences, for `default` and
-`examples`, and it maps `>` comments to `$comment`.
+`***definitions***` section. It adds three annotation sentences, for `label`,
+`default` and `examples`, and it maps `>` comments to `$comment`. It also
+carries what a library of small named schemas needs to read as prose: a
+[named leaf concept](#named-leaf-concepts), [more leaf
+constraints](#leaf-constraints-added-in-version-3), an [escape for one
+property](#the-property-escape), and [concepts bound to a library outside the
+module](#external-concepts). Versions 1 and 2 have none of these.
 
 ```plain
 ---
@@ -490,8 +495,8 @@ is a named object, the following bullets are its reusable `$defs`, in order:
 That document expands in the version-2 fixed member order. `$defs` is placed
 after `required` and before `additionalProperties`, so the root's
 additional-properties directive stays the root's last child, above the
-definitions. A union root, a boolean marker, and `Exact JSON Schema:` cannot be
-followed by definitions.
+definitions. A union root, a leaf root, a boolean marker, and `Exact JSON
+Schema:` cannot be followed by definitions.
 
 Concept names follow ***plain's character set. A `title` or `$defs` key outside
 it is still transported losslessly through `Exact JSON Schema:`. Property names
@@ -505,26 +510,202 @@ A property is `name - description - constraint.`. A property without a
 constraint is a nested object whose attributes follow at the next indentation.
 The first ` - ` after the name separates it from the description, and the last
 unquoted ` - ` separates the description from the constraint. The constraint
-vocabulary is exactly version 2's, with concept tokens in references.
+vocabulary is version 2's, with concept tokens in references, plus [the
+additions below](#leaf-constraints-added-in-version-3). A description may
+itself contain ` - `: only the last unquoted one splits, and a quoted ` - `
+(inside a JSON string, such as a regular expression) never does. The renderer
+writes a description only where that rule gives back the same description.
 
-### Defaults and examples
+### Annotations: Sensitive, defaults and examples
 
-A leaf may end with up to two annotation sentences, in this order:
+A leaf may end with up to three annotation sentences, in this order:
 
 ```plain
   - theme - The color theme - one of "light" or "dark". Defaults to "light". For example: "dark".
+  - mail - The contact address - an email string. Sensitive. Defaults to "none@example.test".
 ```
 
 | Sentence | JSON Schema member, after the constraint members |
 | --- | --- |
+| `Sensitive.` | `label: "sensitive"` |
 | `Defaults to <JSON>.` | `default` |
 | `For example: <JSON list>.` | `examples`, a nonempty array |
 
+`Sensitive.` is exactly the member `"label": "sensitive"`: the value of an
+application's own convention for a field that must not be shown to everyone. It
+may follow any constraint, including a concept reference (`an :Email:.
+Sensitive.`). Any other value of `label` (`"public"`, a number, a second
+`label`) is not this sentence and the property is written in [the property
+escape](#the-property-escape), as is a `label` that does not come right after
+the constraint members. A property merely *named* `label`, or a description
+that contains the word, has nothing to do with it.
+
 Values are strict JSON. An example list uses the same separators as inline
 enums: `"a"`, `"a" or "b"`, `"a", "b", or "c"`. Unlike enums, any JSON values
-are allowed, including objects, arrays, and repeats. A leaf whose `default` and
-`examples` appear in another order, or whose `examples` array is empty, uses
-the exact escape.
+are allowed, including objects, arrays, and repeats. A leaf whose `label`,
+`default` and `examples` appear in another order, or whose `examples` array is
+empty, uses the property escape.
+
+### Named leaf concepts
+
+A concept whose text is a leaf's (a description, a last unquoted ` - `, a
+constraint and a final period) and that has no attributes beneath it is a
+**leaf concept**: a named schema that is not an object. It may be the root, a
+reusable definition, or a union alternative.
+
+```plain
+- :Email: An email address - an email string. Sensitive.
+```
+
+The root and an alternative put `title` first and a definition has none, as an
+object does; after that the members of a leaf follow in this fixed order, which
+is the canonical member order of a leaf schema:
+
+1. `title` (a root or alternative, the concept name);
+2. `description`;
+3. `$comment`, written as `>` lines above the declaration;
+4. the constraint members, in the order the constraint table gives;
+5. `label`, `default`, `examples`, as the annotation sentences.
+
+```json
+{ "title": "Email", "description": "An email address", "type": "string", "format": "email", "label": "sensitive" }
+```
+
+A leaf root carries nothing else, so definitions cannot follow it. A concept
+that has attributes is an object, even when its description happens to contain
+a dash and end with a period (`- :Rank: A rank - or two.` followed by an
+attribute is an object described "A rank - or two."). The converse is why the
+renderer refuses to write an *object with no attributes* whose description reads
+as a leaf (`A thing - or two.`) as a concept: it would be read back as a leaf.
+Such an object, like any other schema the concise form cannot carry, is written
+as `Exact JSON Schema:`.
+
+### Leaf constraints added in version 3
+
+Version 3 adds these to the constraint table of version 2. Every one expands to
+`description` followed by the members shown, in that order, and, like the
+phrases of version 2, takes `, or null` (the ordered type array
+`[<principal type>, "null"]`) where its type is `string`, `integer`, `number`
+or `boolean`.
+
+| Constraint text | JSON Schema members after `description` |
+| --- | --- |
+| `a number` | `type: "number"` |
+| `a non-negative number` | `type: "number"`, `minimum: 0` |
+| `a number between X and Y` | `type: "number"`, `minimum: X`, `maximum: Y` |
+| `a boolean` | `type: "boolean"` |
+| `a string matching "<regex>"` | `type: "string"`, `pattern` |
+| `a date-time string` | `type: "string"`, `format: "date-time"` |
+| `a URL string` | `type: "string"`, `format: "uri"` |
+| `an array of strings` | `type: "array"`, `items: {"type":"string"}` |
+
+`X` and `Y` are JSON numbers and keep their raw tokens, as integer bounds do.
+`a non-negative number` is a `minimum` of exactly the token `0`. The regular
+expression is a JSON string, so a quote, a backslash, a dash or a period inside
+it can never be mistaken for the grammar; a pattern that is exactly a digit
+count (`^[0-9]{15}$`) keeps its version-2 phrase, and formatting rewrites the
+longer spelling to it.
+
+An array of leaves is `an array of` followed by the **plural** of a leaf that
+has one, and its `items` schema is exactly that leaf's members:
+
+| Plural | Its element |
+| --- | --- |
+| `strings`, `integers`, `numbers`, `booleans` | `a string`, `an integer`, `a number`, `a boolean` |
+| `non-negative integers`, `non-negative numbers` | `a non-negative integer`, `a non-negative number` |
+| `email strings`, `URL strings`, `date-time strings`, `UUID strings` | the string with that format |
+| `dates in YYYY-MM-DD format` | `a date in YYYY-MM-DD format` |
+
+Arrays of an element with a count, a range, a pattern or an enumeration, of
+nullable elements, with `minItems` or any other keyword, are written in the
+property escape. An array of concepts (`an array of :Animal:`) is as in
+version 2.
+
+### The property escape
+
+One property that no phrase carries does not make its whole schema exact. In
+version 3 it is written as an attribute whose description position holds
+`Exact JSON Schema:` and the property's complete schema, an object or a
+boolean, as strict JSON on the same line, with no final period:
+
+```plain
+- :Rod: A rod.
+  - length - The length - a number.
+  - pitch (optional) - Exact JSON Schema: {"description":"The pitch","type":"number","multipleOf":0.25}
+  - "any thing" - Exact JSON Schema: true
+```
+
+The name, quoting and `(optional)` marker are the attribute's own, so the
+`required` array is still written by the markers; the description is the JSON's
+`description` member, not a separate sentence. The JSON is opaque: nothing
+inside it is interpreted as PlainType. The attribute has no attributes beneath
+it, and no `>` comment above it (its `$comment` belongs in the JSON). The
+clause `Exact JSON Schema:` is the same one that stands for a whole schema,
+which a property can never begin with; the renderer therefore writes any
+property whose description begins with `Exact JSON Schema:` in the escape, and
+a property written `name - Exact JSON Schema: …` is always the escape.
+
+It carries a property of any shape that has no concise form: an unlisted
+keyword or constraint, a keyword out of order, a boolean or empty schema, an
+object whose own description or keywords the object grammar cannot carry. A
+nested object is itself concise when it can be, with only its odd properties
+escaped. What forces the *whole* schema into `Exact JSON Schema:` is a problem
+with the root, a union, a definition or the shape of `required`, as before.
+
+### External concepts
+
+A document may use a concept it does not declare when the caller says what
+library it names. All of `toJsonSchema`, `parsePlainType`, `fromJsonSchema` and
+`formatPlainType` accept
+
+```ts
+interface ConceptBinding {
+  ref(name: string): string | null;     // `Currency` -> `sys0:Currency`, or null
+  concept(ref: string): string | null;  // `sys0:Currency` -> `Currency`, or null
+}
+// { concepts?: ConceptBinding }
+```
+
+Parsing: a concept in a constraint (`a :Currency:`, `an array of :Currency:`) is
+resolved in this order: the root's name (`$ref: "#"`), a definition of the
+module (`#/$defs/Name`), then `concepts.ref(name)`. Only when that is `null` too
+is it the error `Unknown schema name "Currency"`. A name the module declares
+never reaches the library.
+
+Rendering: a `$ref` that is neither the root nor a definition is written
+`a :Name:` where `concepts.concept(ref)` names it, and as `a reference to
+"…"` (or the linked-resource form) where it returns `null`. The name is used
+only if reading it back gives the same reference: it is a legal concept name,
+the module declares no concept of that name, and `concepts.ref(name)` returns
+that reference. Otherwise the quoted reference is kept, so no binding can make a
+document mean something else. `formatPlainType` parses and renders with the same
+binding, so formatting rewrites `a reference to "sys0:Currency"` to
+`a :Currency:`.
+
+With no option, nothing changes: an undeclared concept is an error and a
+reference is always quoted. The option applies to version 3; the other styles
+have no concepts to bind and ignore it.
+
+### Earlier version-3 text
+
+Version 3 text written before these additions keeps its meaning, with three
+exceptions, each of which was an edge of the old grammar:
+
+- A property whose description begins with `Exact JSON Schema:` is now the
+  [property escape](#the-property-escape).
+- A concept with no attributes whose text reads as a leaf (`- :X: Note - or
+  two.`) is now a [leaf concept](#named-leaf-concepts) and must have a valid
+  constraint; it used to be an object with that description.
+- An object with an empty `$defs` is written `Exact JSON Schema:`; the version-3
+  list had no line to read the empty `$defs` back from, so it was lost.
+
+### Still escaped
+
+The renderer uses the exact escape (the property's, or the whole schema's)
+for everything else, in particular: a property with no `description` (an
+*optional description* is not part of this grammar; a property is
+`name - description - constraint.`), a `$defs` that is empty, `$comment` in any
+position the `>` lines cannot carry, and a `label` other than the sentence.
 
 ### Comments
 

@@ -4,7 +4,9 @@ export {
   fromJsonSchema,
   parsePlainType,
   toJsonSchema,
+  type ConceptBinding,
   type FromJsonOptions,
+  type ParseOptions,
   type RenderStyle,
   type ToJsonOptions,
 } from "./plaintype.js";

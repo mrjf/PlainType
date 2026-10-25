@@ -40,11 +40,13 @@ const KEYWORDS = new Set([
   "email", "UUID", "non-negative", "reference", "to", "allowed", "types", "type", "must", "contain",
   "be", "is", "are", "its", "it", "numeric", "instance", "schema", "required",
   "Defaults", "For", "example", "true", "false",
+  "Sensitive", "number", "numbers", "integers", "boolean", "booleans", "matching", "URL", "date-time", "dates",
 ]);
 const CONCEPT = /^:[A-Za-z0-9+._-]+:/;
 const INLINE = /"(?:[^"\\]|\\.)*"|\[[^\]]*\]\([^)]*\)|:[A-Za-z0-9+._-]+:|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_-]*/g;
 const NAME = /^(?:"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)/;
 const QUALIFIER = /^ ?\((?:optional|required|object|optional, object)\)/;
+const EXACT_PROPERTY = /^ Exact JSON Schema: /;
 
 export function highlight(text: string): Token[] {
   const tokens: Token[] = [];
@@ -113,6 +115,12 @@ function highlightLine(line: string, base: number, out: Token[]): void {
   }
   push(separator === 2 ? cursor + 1 : cursor, cursor + separator, "punct");
   cursor += separator;
+  // v3 property-level escape: "name (optional) - Exact JSON Schema: {…}".
+  const exactProperty = separator === 2 ? EXACT_PROPERTY.exec(line.slice(cursor)) : null;
+  if (exactProperty) {
+    push(cursor + 1, cursor + exactProperty[0].length, "keyword");
+    return push(cursor + exactProperty[0].length, line.length, "json");
+  }
   describe(line, cursor, push);
 }
 

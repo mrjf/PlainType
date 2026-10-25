@@ -16,8 +16,13 @@ notation for Draft 2020-12. Version 2 is a compact conversational notation for
 common object, property, and union shapes, backed by an exact whole-schema
 escape. Version 3 is the same compact model written in ***plain's own syntax
 (concepts, attributes, sections, frontmatter, `>` comments, linked resources),
-plus sentences for defaults and examples. Schemas from older, custom, and
+plus sentences for sensitivity, defaults and examples. Schemas from older, custom, and
 future dialects remain lossless; their semantics are not guessed.
+
+Version 3 also reads a **library of small named schemas** as prose: each file
+has one root concept, which may itself be a leaf (`- :Email: An email address -
+an email string. Sensitive.`), and a schema may name another library's schemas
+as concepts. See [Schema libraries](#schema-libraries-version-3).
 
 ## ***plain-aligned example (version 3)
 
@@ -48,6 +53,63 @@ metadata that the compiler ignores. The pair is
 and [display-settings.schema.json](examples/display-settings.schema.json); the
 [version-3 section of the language contract](docs/language.md#version-3-plain-aligned-grammar)
 maps each ***plain convention.
+
+## Schema libraries (version 3)
+
+A library of reusable schemas (an email address, a postal address, an amount of
+money) is one file per schema, each with a single root concept. In version 3
+they read as prose, with no `Exact JSON Schema:` fallback:
+
+```plain
+***plaintype***
+
+***definitions***
+
+- :Email: An email address - an email string. Sensitive.
+```
+
+```plain
+- :Money: An amount in a currency
+  - amount - The amount, in the currency units - a number.
+  - currency - Its currency - a :Currency:.
+```
+
+What version 3 adds for this, each documented in the
+[language contract](docs/language.md#version-3-plain-aligned-grammar):
+
+- a **named leaf concept**, as the root, a definition or an alternative:
+  `- :Date: A calendar date - a date in YYYY-MM-DD format.`;
+- **more leaf constraints**: `a number`, `a number between 0 and 1`,
+  `a non-negative number`, `a boolean`, `a string matching "^[A-Z]{3}$"`,
+  `a date-time string`, `a URL string`, their `, or null` forms, and arrays of
+  leaves (`an array of strings`, `an array of integers`);
+- the **`Sensitive.`** sentence, the member `"label": "sensitive"`, after the
+  constraint and before `Defaults to` and `For example:`, on any leaf, a
+  concept reference included (`an :Email:. Sensitive.`);
+- a **property-level escape**, `name (optional) - Exact JSON Schema: {…}`, so
+  one odd property is escaped instead of the whole schema;
+- **external concepts**: `toJsonSchema`, `parsePlainType`, `fromJsonSchema` and
+  `formatPlainType` accept `{ concepts: { ref(name), concept(ref) } }`, which
+  resolves `:Currency:` to a `$ref` of the caller's choosing and writes such a
+  `$ref` back as the concept.
+
+```ts
+import { fromJsonSchema, toJsonSchema, type ConceptBinding } from "plaintype";
+
+const library: ConceptBinding = {
+  ref: (name) => (known.has(name) ? `sys0:${name}` : null),
+  concept: (ref) => (ref.startsWith("sys0:") ? ref.slice("sys0:".length) : null),
+};
+const schema = toJsonSchema(money, { concepts: library });
+const text = fromJsonSchema(schema, { style: "plain", concepts: library });
+```
+
+The pairs [email](examples/email.plain.plaintype) /
+[email.schema.json](examples/email.schema.json) and
+[postal-address](examples/postal-address.plain.plaintype) /
+[postal-address.schema.json](examples/postal-address.schema.json) show a leaf
+and an object. An optional description (a property with none) is not part of
+the grammar and stays on the exact escape.
 
 ## Conversational example (version 2)
 
@@ -177,7 +239,7 @@ With no `--style`, `format`
 preserves the input document's version; an explicit style converts to that
 style and header.
 
-The library API exposes `fromJsonSchema`, `toJsonSchema`,
+The library API exposes `fromJsonSchema`, `toJsonSchema`, `parsePlainType`,
 `formatPlainType`, and a lossless JSON AST:
 
 ```ts
@@ -229,6 +291,14 @@ npm run verify:suite -- /path/to/JSON-Schema-Test-Suite/tests/draft2020-12
 The suite verifier runs the JSON → PlainType → JSON invariant over every
 schema in a local checkout of the official
 [JSON Schema Test Suite](https://github.com/json-schema-org/JSON-Schema-Test-Suite).
+
+The suite also holds the schema-library fixtures (`test/plaintype-library.test.ts`),
+the examples (`test/examples.test.ts`) and the highlighter
+(`test/highlight.test.ts`; the demo's own is `demo/tests/highlight.test.ts`).
+The sources a program may vendor by plain copy are `src/index.ts`, `src/json.ts`,
+`src/codecs.ts`, `src/plaintype.ts` and `demo/shared/highlight.ts`: they import
+only each other, nothing from Node, and type-check under
+`noUncheckedIndexedAccess` and `verbatimModuleSyntax`.
 
 Draft 2020-12 remains the latest published JSON Schema dialect; future and
 custom vocabularies are transported losslessly until a semantic codec is

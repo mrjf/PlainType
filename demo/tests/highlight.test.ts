@@ -75,3 +75,28 @@ test("frontmatter lines are metadata", () => {
     ["***plaintype***", "header"],
   ]);
 });
+
+test("classifies the library sentences, constraints and the property escape", () => {
+  expect(classes('  - mail - Its mail - an email string. Sensitive. Defaults to "a".').slice(-5)).toEqual([
+    ["string", "keyword"],
+    ["Sensitive", "keyword"],
+    ["Defaults", "keyword"],
+    ["to", "keyword"],
+    ['"a"', "string"],
+  ]);
+  expect(classes('- :Colour: A colour - a string matching "^#[0-9a-f]{6}$".').slice(-2)).toEqual([
+    ["matching", "keyword"],
+    ['"^#[0-9a-f]{6}$"', "string"],
+  ]);
+  expect(classes("  - a - A - a non-negative number, or null.").filter(([, cls]) => cls === "keyword")).toEqual([
+    ["a", "keyword"],
+    ["non-negative", "keyword"],
+    ["number", "keyword"],
+    ["or", "keyword"],
+    ["null", "keyword"],
+  ]);
+  expect(classes('  - weight (optional) - Exact JSON Schema: {"type":"number"}').slice(-2)).toEqual([
+    ["Exact JSON Schema: ", "keyword"],
+    ['{"type":"number"}', "json"],
+  ]);
+});

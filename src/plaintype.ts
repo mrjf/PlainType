@@ -28,6 +28,7 @@ const HEADER_V3 = "***plaintype***";
 const V3_DEFINITIONS_SECTION = "***definitions***";
 const V3_DEFAULT_LEAD = ". Defaults to ";
 const V3_EXAMPLES_LEAD = ". For example: ";
+const V3_SENSITIVE_LEAD = ". Sensitive";
 const FRONTMATTER_FENCE = "---";
 const ALLOW_ALL = "Every instance is accepted.";
 const DENY_ALL = "No instance is accepted.";
@@ -42,11 +43,55 @@ const V2_ADDITIONAL_UNSPECIFIED = "Additional properties unspecified";
 const V2_DEFINITIONS = "Definitions:";
 const V2_UNION_SUFFIX = " Exactly one of:";
 
+/** The types whose `["<type>", "null"]` array a leaf writes as `, or null`. */
+const V2_NULLABLE_TYPES: readonly string[] = ["string", "integer"];
+const V3_NULLABLE_TYPES: readonly string[] = ["string", "integer", "number", "boolean"];
+
+/**
+ * Version 3: the leaf constraints that can be an array's items, each with the
+ * plural it takes after `an array of`. Constraints with a count, a range or an
+ * enumeration have no plural, and an array of them is written in the escape.
+ */
+const V3_ARRAY_ELEMENTS: ReadonlyMap<string, string> = new Map([
+  ["a string", "strings"],
+  ["an integer", "integers"],
+  ["a number", "numbers"],
+  ["a boolean", "booleans"],
+  ["a non-negative integer", "non-negative integers"],
+  ["a non-negative number", "non-negative numbers"],
+  ["an email string", "email strings"],
+  ["a URL string", "URL strings"],
+  ["a date-time string", "date-time strings"],
+  ["a UUID string", "UUID strings"],
+  ["a date in YYYY-MM-DD format", "dates in YYYY-MM-DD format"],
+]);
+const V3_ARRAY_ELEMENT_BY_PLURAL: ReadonlyMap<string, string> = new Map(
+  [...V3_ARRAY_ELEMENTS].map(([singular, plural]) => [plural, singular]),
+);
+
 type PlainTypeVersion = 1 | 2 | 3;
 /** The two grammars that share the compact declaration model. */
 type ConversationalVersion = 2 | 3;
 
 export type RenderStyle = "structured" | "conversational" | "plain";
+
+/**
+ * Names the schemas of a library that lives outside the module, so a version-3
+ * document can say `a :Currency:` for a schema it does not declare. Each
+ * answer is the caller's: a name it cannot resolve, or a `$ref` it has no name
+ * for, is `null`. Only the `plain` style (version 3) has concepts to bind.
+ */
+export interface ConceptBinding {
+  /** The `$ref` a concept used but not declared in the module stands for, e.g. `sys0:Currency`. */
+  ref(name: string): string | null;
+  /** The concept a `$ref` is written as when rendering, or null to keep `a reference to "…"`. */
+  concept(ref: string): string | null;
+}
+
+export interface ParseOptions {
+  /** External concepts. Without it, a concept the module does not declare is an error. */
+  readonly concepts?: ConceptBinding;
+}
 
 export interface FromJsonOptions {
   /**
@@ -60,9 +105,14 @@ export interface FromJsonOptions {
    * v3 grammar, which follows ***plain's concept and section syntax.
    */
   readonly style?: RenderStyle;
+  /**
+   * External concepts. Rendering writes a `$ref` the binding names as that
+   * concept (`a :Currency:`); `formatPlainType` parses with the same binding.
+   */
+  readonly concepts?: ConceptBinding;
 }
 
-export interface ToJsonOptions {
+export interface ToJsonOptions extends ParseOptions {
   /** Number of spaces in emitted JSON. Defaults to 2; use 0 for compact JSON. */
   readonly space?: number;
 }
@@ -108,13 +158,18 @@ export function fromJsonSchema(json: string, options: FromJsonOptions = {}): str
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
   const style = options.style ?? "structured";
-  return `${renderDocumentLines(schema, dialect, style).join("\n")}\n`;
+  return `${renderDocumentLines(schema, dialect, style, options.concepts).join("\n")}\n`;
 }
 
-function renderDocumentLines(schema: JsonNode, dialect: string | null, style: RenderStyle): string[] {
+function renderDocumentLines(
+  schema: JsonNode,
+  dialect: string | null,
+  style: RenderStyle,
+  concepts: ConceptBinding | undefined,
+): string[] {
   switch (style) {
     case "plain":
-      return [HEADER_V3, "", V3_DEFINITIONS_SECTION, "", ...renderSchemaV2(schema, 0, dialect, 3)];
+      return [HEADER_V3, "", V3_DEFINITIONS_SECTION, "", ...renderSchemaV2(schema, 0, dialect, 3, concepts)];
     case "conversational":
       return [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect, 2)];
     case "structured":
@@ -124,14 +179,14 @@ function renderDocumentLines(schema: JsonNode, dialect: string | null, style: Re
 
 /** Convert PlainType into canonical JSON Schema JSON. */
 export function toJsonSchema(source: string, options: ToJsonOptions = {}): string {
-  const schema = parsePlainType(source);
+  const schema = parsePlainType(source, options);
   const space = options.space ?? 2;
   return `${stringifyJson(schema, space)}\n`;
 }
 
 /** Parse PlainType into the lossless JSON AST used by the converter. */
-export function parsePlainType(source: string): JsonNode {
-  return parsePlainTypeDocument(source).schema;
+export function parsePlainType(source: string, options: ParseOptions = {}): JsonNode {
+  return parsePlainTypeDocument(source, options.concepts).schema;
 }
 
 interface ParsedDocument {
@@ -141,7 +196,7 @@ interface ParsedDocument {
   readonly frontmatter: string | null;
 }
 
-function parsePlainTypeDocument(source: string): ParsedDocument {
+function parsePlainTypeDocument(source: string, concepts?: ConceptBinding): ParsedDocument {
   const normalized = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const lines = normalized.split("\n");
   let headerIndex = skipBlankLines(lines, 0);
@@ -177,7 +232,7 @@ function parsePlainTypeDocument(source: string): ParsedDocument {
     throw new PlainTypeSyntaxError("Expected at least one schema clause", headerIndex + 2);
   }
   const schema = v3Body !== null
-    ? schemaFromV3Bullets(bullets, v3Body.comments)
+    ? schemaFromV3Bullets(bullets, v3Body.comments, concepts)
     : version === 2
       ? schemaFromV2Bullets(bullets)
       : schemaFromBullets(bullets);
@@ -261,12 +316,12 @@ const STYLE_FOR_VERSION: Readonly<Record<PlainTypeVersion, RenderStyle>> = {
 
 /** Canonicalize an already-authored PlainType document. */
 export function formatPlainType(source: string, options: FromJsonOptions = {}): string {
-  const parsed = parsePlainTypeDocument(source);
+  const parsed = parsePlainTypeDocument(source, options.concepts);
   const schema = parsed.schema;
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
   const style = options.style ?? STYLE_FOR_VERSION[parsed.version];
-  const lines = renderDocumentLines(schema, dialect, style);
+  const lines = renderDocumentLines(schema, dialect, style, options.concepts);
   // Frontmatter is v3 module metadata; other grammars have nowhere to keep it.
   const frontmatter = style === "plain" && parsed.frontmatter !== null ? [parsed.frontmatter, ""] : [];
   return `${[...frontmatter, ...lines].join("\n")}\n`;
@@ -646,7 +701,7 @@ interface V2LeafPlan {
   readonly description: string;
   readonly comment: string | null;
   readonly constraint: string;
-  /** Version 3 only: trailing ` Defaults to …. For example: ….` sentences. */
+  /** Version 3 only: trailing ` Sensitive. Defaults to …. For example: ….` sentences. */
   readonly annotations: string;
 }
 
@@ -669,6 +724,8 @@ interface V2ReferenceContext {
   readonly definitionNames: ReadonlySet<string>;
   /** Version 3: `$comment` text keyed by the line of the declaration it precedes. */
   readonly comments?: ReadonlyMap<number, string>;
+  /** Version 3: schemas named outside the module. */
+  readonly concepts?: ConceptBinding;
 }
 
 /** Render the compact version-2 conversational grammar, with an exact universal escape. */
@@ -677,19 +734,22 @@ function renderSchemaV2(
   depth: number,
   inheritedDialect: string | null,
   version: ConversationalVersion,
+  concepts?: ConceptBinding,
 ): string[] {
   if (node.type === "boolean") {
     return [`${indent(depth)}- ${node.value ? ALLOW_ALL : DENY_ALL}`];
   }
   if (node.type !== "object") return renderV2ExactSchema(node, depth);
   const dialect = dialectDeclaredBy(node) ?? inheritedDialect;
-  const context = v2ReferenceContextFromSchema(node);
+  const context = v2ReferenceContextFromSchema(node, version === 3 ? concepts : undefined);
   if (context === null) return renderV2ExactSchema(node, depth);
   if (dialect === DRAFT_2020_12) {
     const union = v2UnionPlan(node, version);
     if (union !== null) return renderV2Union(union, depth, dialect, context, version);
     const object = v2ObjectPlan(node, true, context, true, version);
     if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
+    const leaf = version === 3 ? v3NamedLeafPlan(node, context) : null;
+    if (leaf !== null) return renderV3NamedLeaf(leaf.name, leaf.plan, depth);
   }
   return renderV2ExactSchema(node, depth);
 }
@@ -706,12 +766,20 @@ function renderV2SchemaAlternative(
     if (union !== null) return renderV2Union(union, depth, dialect, context, version);
     const object = v2ObjectPlan(node, true, context, false, version);
     if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
+    const leaf = version === 3 ? v3NamedLeafPlan(node, context) : null;
+    if (leaf !== null) return renderV3NamedLeaf(leaf.name, leaf.plan, depth);
   }
   return renderV2ExactSchema(node, depth);
 }
 
 function renderV2ExactSchema(node: JsonNode, depth: number): string[] {
   return [`${indent(depth)}- ${V2_EXACT_SCHEMA_LEAD} ${stringifyJson(node)}`];
+}
+
+/** A property whose schema no concise form carries: `name (optional) - Exact JSON Schema: {…}`. */
+function renderV3ExactProperty(name: string, optional: boolean, node: JsonNode, depth: number): string {
+  const marker = optional ? " (optional)" : "";
+  return `${indent(depth)}- ${renderPropertyName(name)}${marker} - ${V2_EXACT_SCHEMA_LEAD} ${stringifyJson(node)}`;
 }
 
 function v2ObjectPlan(
@@ -786,6 +854,8 @@ function v2ObjectPlan(
       definitionsEntry.value.type !== "object" ||
       !schemaMapContainsOnlySchemas(definitionsEntry.value) ||
       new Set(definitionsEntry.value.entries.map(({ key }) => key)).size !== definitionsEntry.value.entries.length ||
+      // v3 lists definitions beside the root, so an empty `$defs` has no line to read it back from.
+      (version === 3 && definitionsEntry.value.entries.length === 0) ||
       (version === 3 && !definitionsEntry.value.entries.every(({ key }) => isConceptName(key)))
     ) {
       return null;
@@ -802,20 +872,24 @@ function v2ObjectPlan(
     index += 1;
   }
   if (index !== node.entries.length) return null;
+  // With no attribute lines, an object whose prose reads like a leaf would be read back as one.
+  if (
+    version === 3 && properties.value.entries.length === 0 && additionalMode === "closed" &&
+    isLeafBody(description.value.value)
+  ) {
+    return null;
+  }
 
   for (const property of properties.value.entries) {
-    if (v2LeafPlan(property.value, context, version) === null) {
-      if (property.value.type !== "object") return null;
-      const nestedPlan = v2ObjectPlan(property.value, false, context, false, version);
-      if (nestedPlan === null || v2ObjectDescriptionLooksLikeLeaf(nestedPlan)) return null;
-    }
+    if (propertyShape(property.value, context, version) === null) return null;
   }
 
   if (definitions !== null) {
     for (const definition of definitions.entries) {
       if (
         definition.value.type !== "object" ||
-        v2ObjectPlan(definition.value, false, context, false, version) === null
+        (v2ObjectPlan(definition.value, false, context, false, version) === null &&
+          (version !== 3 || v2LeafPlan(definition.value, context, version) === null))
       ) {
         return null;
       }
@@ -838,6 +912,53 @@ function v2ObjectDescriptionLooksLikeLeaf(plan: V2ObjectPlan): boolean {
     lastUnquotedSeparator(plan.description, " - ") >= 0;
 }
 
+/** How one property is written: as a leaf, as a nested object, or (version 3 only) in the exact escape. */
+type PropertyShape =
+  | { readonly kind: "leaf"; readonly leaf: V2LeafPlan }
+  | { readonly kind: "object"; readonly plan: V2ObjectPlan }
+  | { readonly kind: "exact" };
+
+/**
+ * Version 2 has no way to write one odd property, so it makes its whole schema
+ * exact (null). Version 3 writes just that property in the exact escape, which
+ * is also how it writes a description that would otherwise read as the escape.
+ */
+function propertyShape(node: JsonNode, context: V2ReferenceContext, version: ConversationalVersion): PropertyShape | null {
+  const leaf = v2LeafPlan(node, context, version);
+  if (leaf !== null && !(version === 3 && leaf.description.startsWith(V2_EXACT_SCHEMA_LEAD))) {
+    return { kind: "leaf", leaf };
+  }
+  if (leaf === null && node.type === "object") {
+    const plan = v2ObjectPlan(node, false, context, false, version);
+    if (
+      plan !== null &&
+      !v2ObjectDescriptionLooksLikeLeaf(plan) &&
+      !(version === 3 && plan.description.startsWith(V2_EXACT_SCHEMA_LEAD))
+    ) {
+      return { kind: "object", plan };
+    }
+  }
+  return version === 3 ? { kind: "exact" } : null;
+}
+
+/** A named root, alternative or definition that is a leaf, as `- :Email: An email address - an email string.`. */
+function v3NamedLeafPlan(
+  node: JsonObject,
+  context: V2ReferenceContext,
+): { readonly name: string; readonly plan: V2LeafPlan } | null {
+  const title = node.entries[0];
+  if (title?.key !== "title" || title.value.type !== "string" || !isConceptName(title.value.value)) return null;
+  const plan = v2LeafPlan(objectNode(node.entries.slice(1)), context, 3);
+  return plan === null ? null : { name: title.value.value, plan };
+}
+
+function renderV3NamedLeaf(name: string, leaf: V2LeafPlan, depth: number): string[] {
+  return [
+    ...renderV3Comment(leaf.comment, depth),
+    `${indent(depth)}- ${conceptToken(name)} ${leaf.description} - ${leaf.constraint}${leaf.annotations}.`,
+  ];
+}
+
 function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: ConversationalVersion): V2LeafPlan | null {
   if (node.type !== "object") return null;
   const description = node.entries[0];
@@ -854,7 +975,7 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: Conver
   if (comment !== null) rest = rest.slice(1);
   let annotations = "";
   if (version === 3) {
-    // Fixed order after the constraint members: `default`, then `examples`.
+    // Fixed order after the constraint members: `label`, `default`, then `examples`.
     const examples = rest.at(-1);
     if (examples?.key === "examples" && examples.value.type === "array" && examples.value.items.length > 0) {
       annotations = `${V3_EXAMPLES_LEAD}${joinNaturalList(examples.value.items.map((item) => stringifyJson(item)))}`;
@@ -863,6 +984,11 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: Conver
     const fallback = rest.at(-1);
     if (fallback?.key === "default") {
       annotations = `${V3_DEFAULT_LEAD}${stringifyJson(fallback.value)}${annotations}`;
+      rest = rest.slice(0, -1);
+    }
+    const label = rest.at(-1);
+    if (label?.key === "label" && label.value.type === "string" && label.value.value === "sensitive") {
+      annotations = `${V3_SENSITIVE_LEAD}${annotations}`;
       rest = rest.slice(0, -1);
     }
   }
@@ -946,12 +1072,11 @@ function renderV2Object(
   const required = new Set(plan.requiredNames);
   for (const property of plan.properties.entries) {
     const propertyOptional = !required.has(property.key);
-    const nestedObject = property.value.type === "object"
-      ? v2ObjectPlan(property.value, false, context, false, version)
-      : null;
-    if (nestedObject !== null) {
+    const shape = propertyShape(property.value, context, version);
+    if (shape === null) throw new TypeError("A planned v2 property became unrenderable");
+    if (shape.kind === "object") {
       lines.push(...renderV2Object(
-        { ...nestedObject, name: property.key },
+        { ...shape.plan, name: property.key },
         depth + 1,
         dialect,
         propertyOptional,
@@ -961,8 +1086,11 @@ function renderV2Object(
       ));
       continue;
     }
-    const leaf = v2LeafPlan(property.value, context, version);
-    if (leaf === null) throw new TypeError("A planned v2 property became unrenderable");
+    if (shape.kind === "exact") {
+      lines.push(renderV3ExactProperty(property.key, propertyOptional, property.value, depth + 1));
+      continue;
+    }
+    const leaf = shape.leaf;
     const optionalMarker = propertyOptional ? " (optional)" : "";
     const separator = version === 2 ? ":" : " -";
     lines.push(...renderV3Comment(leaf.comment, depth + 1));
@@ -983,16 +1111,22 @@ function renderV2Object(
         throw new TypeError("A planned v2 definition became unrenderable");
       }
       const definitionPlan = v2ObjectPlan(definition.value, false, context, false, version);
-      if (definitionPlan === null) throw new TypeError("A planned v2 definition became unrenderable");
-      const rendered = renderV2Object(
-        { ...definitionPlan, name: definition.key },
-        definitionDepth,
-        dialect,
-        false,
-        false,
-        context,
-        version,
-      );
+      let rendered: string[];
+      if (definitionPlan !== null) {
+        rendered = renderV2Object(
+          { ...definitionPlan, name: definition.key },
+          definitionDepth,
+          dialect,
+          false,
+          false,
+          context,
+          version,
+        );
+      } else {
+        const definitionLeaf = version === 3 ? v2LeafPlan(definition.value, context, version) : null;
+        if (definitionLeaf === null) throw new TypeError("A planned v2 definition became unrenderable");
+        rendered = renderV3NamedLeaf(definition.key, definitionLeaf, definitionDepth);
+      }
       if (version === 2) lines.push(...rendered);
       else definitionLines.push("", ...rendered);
     }
@@ -1024,6 +1158,16 @@ function renderV2Constraint(
     if (name === null) return null;
     return `an array of ${version === 3 ? conceptToken(name) : name}`;
   }
+  if (
+    version === 3 &&
+    entries.length === 2 &&
+    entries[0]?.key === "type" && entries[0].value.type === "string" && entries[0].value.value === "array" &&
+    entries[1]?.key === "items" && entries[1].value.type === "object"
+  ) {
+    const element = renderV2Constraint(entries[1].value.entries, context, version);
+    const plural = element === null ? undefined : V3_ARRAY_ELEMENTS.get(element);
+    if (plural !== undefined) return `an array of ${plural}`;
+  }
   if (entries.length === 1 && entries[0]?.key === "const") {
     return stringifyJson(entries[0].value);
   }
@@ -1043,7 +1187,8 @@ function renderV2Constraint(
   if (typeEntry?.key !== "type") return null;
   const types = v2TypeNames(typeEntry.value);
   if (types === null) return null;
-  const nullableSuffix = arraysEqual(types, ["string", "null"]) || arraysEqual(types, ["integer", "null"])
+  const nullableSuffix = (version === 3 ? V3_NULLABLE_TYPES : V2_NULLABLE_TYPES)
+    .some((nullable) => arraysEqual(types, [nullable, "null"]))
     ? ", or null"
     : "";
   const principal = nullableSuffix === "" ? types : [types[0] ?? ""];
@@ -1059,6 +1204,8 @@ function renderV2Constraint(
       if (rest[0].value.value === "date") return `a date in YYYY-MM-DD format${nullableSuffix}`;
       if (rest[0].value.value === "email") return `an email string${nullableSuffix}`;
       if (rest[0].value.value === "uuid") return `a UUID string${nullableSuffix}`;
+      if (version === 3 && rest[0].value.value === "date-time") return `a date-time string${nullableSuffix}`;
+      if (version === 3 && rest[0].value.value === "uri") return `a URL string${nullableSuffix}`;
       return null;
     }
     if (rest.length === 1 && rest[0]?.key === "pattern" && rest[0].value.type === "string") {
@@ -1067,6 +1214,7 @@ function renderV2Constraint(
         const count = digits[1] ?? "0";
         return `a string of exactly ${v2RenderCount(count)} ${count === "1" ? "digit" : "digits"}${nullableSuffix}`;
       }
+      if (version === 3) return `a string matching ${jsonString(rest[0].value.value)}${nullableSuffix}`;
       return null;
     }
     if (
@@ -1112,6 +1260,24 @@ function renderV2Constraint(
       return `an integer between ${rest[0].value.raw} and ${rest[1].value.raw}${nullableSuffix}`;
     }
   }
+
+  if (version === 3 && type === "number") {
+    if (rest.length === 0) return `a number${nullableSuffix}`;
+    if (
+      rest.length === 1 && rest[0]?.key === "minimum" &&
+      rest[0].value.type === "number" && rest[0].value.raw === "0"
+    ) {
+      return `a non-negative number${nullableSuffix}`;
+    }
+    if (
+      rest.length === 2 &&
+      rest[0]?.key === "minimum" && rest[0].value.type === "number" &&
+      rest[1]?.key === "maximum" && rest[1].value.type === "number"
+    ) {
+      return `a number between ${rest[0].value.raw} and ${rest[1].value.raw}${nullableSuffix}`;
+    }
+  }
+  if (version === 3 && type === "boolean" && rest.length === 0) return `a boolean${nullableSuffix}`;
   return null;
 }
 
@@ -1139,10 +1305,36 @@ function renderV2ReferenceName(
     return context.rootName;
   }
   const prefix = "#/$defs/";
-  if (!reference.startsWith(prefix)) return null;
-  const token = reference.slice(prefix.length);
-  if (!safe(token) || !context.definitionNames.has(token)) return null;
-  return token;
+  if (reference.startsWith(prefix)) {
+    const token = reference.slice(prefix.length);
+    if (safe(token) && context.definitionNames.has(token)) return token;
+  }
+  return v3ExternalConceptName(reference, context, version);
+}
+
+/**
+ * The concept a bound library names `reference`, only when reading it back
+ * gives the same reference: the name is not one the module declares (a
+ * declared name always means the declaration) and the binding resolves it to
+ * this reference, so the written document can never mean something else.
+ */
+function v3ExternalConceptName(
+  reference: string,
+  context: V2ReferenceContext,
+  version: ConversationalVersion,
+): string | null {
+  if (version !== 3 || context.concepts === undefined) return null;
+  const name = context.concepts.concept(reference);
+  if (
+    name === null ||
+    !isConceptName(name) ||
+    name === context.rootName ||
+    context.definitionNames.has(name) ||
+    context.concepts.ref(name) !== reference
+  ) {
+    return null;
+  }
+  return name;
 }
 
 /** ***plain concept names: letters, digits, `+`, `-`, `.`, and `_`. */
@@ -1185,7 +1377,7 @@ function v2TypeNames(node: JsonNode): string[] | null {
   return null;
 }
 
-function v2ReferenceContextFromSchema(node: JsonObject): V2ReferenceContext | null {
+function v2ReferenceContextFromSchema(node: JsonObject, concepts?: ConceptBinding): V2ReferenceContext | null {
   const title = node.entries[0];
   const rootName = title?.key === "title" && title.value.type === "string"
     ? title.value.value
@@ -1199,7 +1391,7 @@ function v2ReferenceContextFromSchema(node: JsonObject): V2ReferenceContext | nu
   );
   if (definitions?.type === "object" && definitionNames.size !== definitions.entries.length) return null;
   if (rootName !== null && definitionNames.has(rootName)) return null;
-  return { rootName, definitionNames };
+  return concepts === undefined ? { rootName, definitionNames } : { rootName, definitionNames, concepts };
 }
 
 function v2RenderCount(raw: string): string {
@@ -1226,10 +1418,18 @@ function schemaFromV2Bullets(bullets: readonly Bullet[]): JsonNode {
  * Version 3: the `***definitions***` list holds the root schema first and its
  * reusable `$defs` after it, each written as a ***plain concept definition.
  */
-function schemaFromV3Bullets(bullets: readonly Bullet[], comments: ReadonlyMap<number, string>): JsonNode {
+function schemaFromV3Bullets(
+  bullets: readonly Bullet[],
+  comments: ReadonlyMap<number, string>,
+  concepts: ConceptBinding | undefined,
+): JsonNode {
   const [root, ...definitions] = bullets;
   if (root === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
-  const context = { ...v3ReferenceContextFromBullets(root, definitions), comments };
+  const context: V2ReferenceContext = {
+    ...v3ReferenceContextFromBullets(root, definitions),
+    comments,
+    ...(concepts === undefined ? {} : { concepts }),
+  };
   if (isV2MarkerClause(root.text)) {
     if (definitions[0] !== undefined) {
       throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
@@ -1237,7 +1437,7 @@ function schemaFromV3Bullets(bullets: readonly Bullet[], comments: ReadonlyMap<n
     return schemaFromV2Bullet(root, context, false, 3);
   }
   const declaration = parseV3ConceptDeclaration(root.text, root.line);
-  if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
+  if (declaration.body.endsWith(V2_UNION_SUFFIX) || isLeafConcept(declaration, root)) {
     if (definitions[0] !== undefined) {
       throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
     }
@@ -1323,6 +1523,12 @@ function schemaFromV2Bullet(
     throw new PlainTypeSyntaxError("A root schema or alternative cannot be optional", bullet.line);
   }
 
+  if (version === 3 && isLeafConcept(declaration, bullet)) {
+    return objectNode([
+      { key: "title", value: { type: "string", value: declaration.name } },
+      ...leafEntries(declaration.body, bullet, context, version, "leaf concept"),
+    ]);
+  }
   if (!declaration.body.endsWith(V2_UNION_SUFFIX)) {
     return schemaFromV2Object(declaration, bullet, true, context, allowDefinitions, version);
   }
@@ -1430,11 +1636,13 @@ function schemaFromV2Object(
     for (const definitionBullet of siblingDefinitions) {
       const definition = parseV3ConceptDeclaration(definitionBullet.text, definitionBullet.line);
       if (definition.body.endsWith(V2_UNION_SUFFIX)) {
-        throw new PlainTypeSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
+        throw new PlainTypeSyntaxError("A concise reusable definition must be an object or a leaf", definitionBullet.line);
       }
       entries.push({
         key: definition.name,
-        value: schemaFromV2Object(definition, definitionBullet, false, context, false, version),
+        value: isLeafConcept(definition, definitionBullet)
+          ? objectNode(leafEntries(definition.body, definitionBullet, context, version, "leaf concept"))
+          : schemaFromV2Object(definition, definitionBullet, false, context, false, version),
       });
     }
     definitions = objectNode(entries);
@@ -1464,37 +1672,72 @@ function propertyFromV2Bullet(
   const declaration = version === 3
     ? parseV3AttributeDeclaration(bullet.text, bullet.line)
     : parseV2Declaration(bullet.text, bullet.line);
+  if (version === 3 && declaration.body.startsWith(`${V2_EXACT_SCHEMA_LEAD} `)) {
+    requireNoChildren(bullet);
+    if (context.comments?.has(bullet.line)) {
+      throw new PlainTypeSyntaxError("A comment cannot describe this clause; put $comment inside an exact JSON Schema", bullet.line);
+    }
+    const schema = parseEmbeddedJson(declaration.body.slice(V2_EXACT_SCHEMA_LEAD.length + 1), bullet.line);
+    if (!isSchemaNode(schema)) {
+      throw new PlainTypeSyntaxError("An exact JSON Schema must be an object or boolean", bullet.line);
+    }
+    return { name: declaration.name, optional: declaration.optional, schema };
+  }
   if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
     throw new PlainTypeSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
   }
-  const separator = lastUnquotedSeparator(declaration.body, " - ");
-  const hasLeafShape = separator >= 0 && declaration.body.endsWith(".");
-  if (declaration.object || !hasLeafShape) {
+  if (declaration.object || !isLeafBody(declaration.body)) {
     return {
       name: declaration.name,
       optional: declaration.optional,
       schema: schemaFromV2Object(declaration, bullet, false, context, false, version),
     };
   }
+  return {
+    name: declaration.name,
+    optional: declaration.optional,
+    schema: objectNode(leafEntries(declaration.body, bullet, context, version, "property")),
+  };
+}
+
+/** A body that ends with a period after a last unquoted ` - ` is a leaf: `description - constraint.`. */
+function isLeafBody(body: string): boolean {
+  return body.endsWith(".") && lastUnquotedSeparator(body, " - ") >= 0;
+}
+
+/**
+ * A concept is a leaf when its text is a leaf's and it has no attributes. An
+ * object can have such a description (a dash and a period in the middle of its
+ * prose), so one with attributes is still an object.
+ */
+function isLeafConcept(declaration: V2Declaration, bullet: Bullet): boolean {
+  return bullet.children.length === 0 && isLeafBody(declaration.body);
+}
+
+/** The members of a leaf's schema: its description, its comment, its constraint, then its annotations. */
+function leafEntries(
+  body: string,
+  bullet: Bullet,
+  context: V2ReferenceContext,
+  version: ConversationalVersion,
+  subject: "property" | "leaf concept",
+): JsonObjectEntry[] {
   requireNoChildren(bullet);
-  const description = declaration.body.slice(0, separator);
-  const tail = declaration.body.slice(separator + 3, -1);
+  const separator = lastUnquotedSeparator(body, " - ");
+  const description = body.slice(0, separator);
+  const tail = body.slice(separator + 3, -1);
   if (description === "" || !isSafeV2InlineDescription(description)) {
-    throw new PlainTypeSyntaxError("A property needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError(`A ${subject} needs a safe inline description`, bullet.line);
   }
   const { constraint, annotations } = version === 3
     ? splitV3Annotations(tail, bullet.line)
     : { constraint: tail, annotations: [] };
-  return {
-    name: declaration.name,
-    optional: declaration.optional,
-    schema: objectNode([
-      { key: "description", value: { type: "string", value: description } },
-      ...commentEntries(bullet, context),
-      ...entriesFromV2Constraint(constraint, bullet.line, context, version),
-      ...annotations,
-    ]),
-  };
+  return [
+    { key: "description", value: { type: "string", value: description } },
+    ...commentEntries(bullet, context),
+    ...entriesFromV2Constraint(constraint, bullet.line, context, version),
+    ...annotations,
+  ];
 }
 
 function commentEntries(bullet: Bullet, context: V2ReferenceContext): JsonObjectEntry[] {
@@ -1502,7 +1745,7 @@ function commentEntries(bullet: Bullet, context: V2ReferenceContext): JsonObject
   return comment === undefined ? [] : [{ key: "$comment", value: { type: "string", value: comment } }];
 }
 
-/** Split `constraint. Defaults to X. For example: A or B` into the constraint and annotation members. */
+/** Split `constraint. Sensitive. Defaults to X. For example: A or B` into the constraint and annotation members. */
 function splitV3Annotations(source: string, line: number): { constraint: string; annotations: JsonObjectEntry[] } {
   let constraint = source;
   let examples: JsonObjectEntry | null = null;
@@ -1518,7 +1761,15 @@ function splitV3Annotations(source: string, line: number): { constraint: string;
     fallback = { key: "default", value: parseEmbeddedJson(constraint.slice(defaultAt + V3_DEFAULT_LEAD.length), line) };
     constraint = constraint.slice(0, defaultAt);
   }
-  return { constraint, annotations: [...(fallback ? [fallback] : []), ...(examples ? [examples] : [])] };
+  let label: JsonObjectEntry | null = null;
+  if (constraint.endsWith(V3_SENSITIVE_LEAD)) {
+    label = { key: "label", value: { type: "string", value: "sensitive" } };
+    constraint = constraint.slice(0, -V3_SENSITIVE_LEAD.length);
+  }
+  return {
+    constraint,
+    annotations: [...(label ? [label] : []), ...(fallback ? [fallback] : []), ...(examples ? [examples] : [])],
+  };
 }
 
 function entriesFromV2Constraint(
@@ -1537,7 +1788,7 @@ function entriesFromV2Constraint(
 
   const nullable = source.endsWith(", or null");
   const base = nullable ? source.slice(0, -", or null".length) : source;
-  const typeEntry = (type: "string" | "integer"): JsonObjectEntry => ({
+  const typeEntry = (type: "string" | "integer" | "number" | "boolean"): JsonObjectEntry => ({
     key: "type",
     value: nullable
       ? arrayNode([{ type: "string", value: type }, { type: "string", value: "null" }])
@@ -1557,6 +1808,10 @@ function entriesFromV2Constraint(
   }
   if (base === "a UUID string") {
     return [typeEntry("string"), { key: "format", value: { type: "string", value: "uuid" } }];
+  }
+  if (version === 3) {
+    const entries = v3LeafEntries(base, typeEntry, line);
+    if (entries !== null) return entries;
   }
 
   const externalReference = nullable ? null : /^a reference to ("(?:[^"\\]|\\[\s\S])*")$/.exec(base);
@@ -1585,6 +1840,15 @@ function entriesFromV2Constraint(
     return [
       { key: "type", value: { type: "string", value: "array" } },
       { key: "items", value: objectNode([{ key: "$ref", value: { type: "string", value: reference } }]) },
+    ];
+  }
+
+  const arrayElements = version === 3 && !nullable ? /^an array of (.+)$/.exec(base) : null;
+  const element = arrayElements === null ? undefined : V3_ARRAY_ELEMENT_BY_PLURAL.get(arrayElements[1] ?? "");
+  if (element !== undefined) {
+    return [
+      { key: "type", value: { type: "string", value: "array" } },
+      { key: "items", value: objectNode(entriesFromV2Constraint(element, line, context, version)) },
     ];
   }
 
@@ -1650,9 +1914,44 @@ function entriesFromV2Constraint(
   throw new PlainTypeSyntaxError(`Unknown version-${version} constraint ${JSON.stringify(source)}`, line);
 }
 
+/** Version 3's additions to the type-led constraints, or null when `base` is none of them. */
+function v3LeafEntries(
+  base: string,
+  typeEntry: (type: "string" | "integer" | "number" | "boolean") => JsonObjectEntry,
+  line: number,
+): JsonObjectEntry[] | null {
+  const format = (value: string): JsonObjectEntry => ({ key: "format", value: { type: "string", value } });
+  if (base === "a number") return [typeEntry("number")];
+  if (base === "a non-negative number") {
+    return [typeEntry("number"), { key: "minimum", value: { type: "number", raw: "0" } }];
+  }
+  if (base === "a boolean") return [typeEntry("boolean")];
+  if (base === "a date-time string") return [typeEntry("string"), format("date-time")];
+  if (base === "a URL string") return [typeEntry("string"), format("uri")];
+
+  const numberRange = /^a number between (\S+) and (\S+)$/.exec(base);
+  if (numberRange !== null) {
+    return [
+      typeEntry("number"),
+      { key: "minimum", value: v2NumberNode(numberRange[1] ?? "", line) },
+      { key: "maximum", value: v2NumberNode(numberRange[2] ?? "", line) },
+    ];
+  }
+
+  const matching = /^a string matching ("(?:[^"\\]|\\[\s\S])*")$/.exec(base);
+  if (matching !== null) {
+    const pattern = parseEmbeddedJson(matching[1] ?? "", line);
+    if (pattern.type !== "string") throw new PlainTypeSyntaxError("Expected a regular expression string", line);
+    return [typeEntry("string"), { key: "pattern", value: pattern }];
+  }
+  return null;
+}
+
 function v2NamedReference(name: string, line: number, context: V2ReferenceContext): string {
   if (name === context.rootName) return "#";
   if (context.definitionNames.has(name)) return `#/$defs/${name}`;
+  const external = context.concepts?.ref(name);
+  if (external !== undefined && external !== null) return external;
   throw new PlainTypeSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
 }
 
