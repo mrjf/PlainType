@@ -1,14 +1,20 @@
-# SchemaPlain language contract
+# PlainType language contract
 
-SchemaPlain has two versioned, deterministic surface grammars over the same
+PlainType has three versioned, deterministic surface grammars over the same
 lossless JSON abstract syntax tree. The header selects the parser; it is not a
 comment or an advisory version number.
+
+| Header | Style name | Grammar |
+| --- | --- | --- |
+| `***plaintype 1***` | `structured` | Complete keyword-by-keyword clauses |
+| `***plaintype 2***` | `conversational` | Compact object, property, and union declarations |
+| `***plaintype 3***` | `plain` | The version-2 model written in [***plain](https://plainlang.org/docs/language-guide/basic-syntax) syntax |
 
 ## Version 1: structured grammar
 
 ### Scope
 
-SchemaPlain is controlled English over a lossless JSON abstract syntax tree.
+PlainType is controlled English over a lossless JSON abstract syntax tree.
 The compiler accepts only documented phrases. Synonyms and free-form prose are
 syntax errors, which is what makes reverse translation deterministic.
 
@@ -29,7 +35,7 @@ separate, versioned dialect profile.
 A document starts with the exact version heading:
 
 ```plain
-***schemaplain 1***
+***plaintype 1***
 ```
 
 The schema follows as two-space-indented bullet clauses and semantic `#`
@@ -175,7 +181,7 @@ If the root omits `$schema`, APIs and the CLI default its out-of-band context to
 that URI. This affects wording only; it never inserts or changes a JSON member.
 Set the context to `null` / `--dialect none` for fully opaque output.
 
-SchemaPlain does not fetch dialect URIs, resolve references, infer vocabularies,
+PlainType does not fetch dialect URIs, resolve references, infer vocabularies,
 or validate instances.
 
 ### Round-trip equality
@@ -192,13 +198,13 @@ object member sequence, and duplicate members.
 
 It intentionally does not retain insignificant whitespace, a BOM, or alternate
 string escape spelling. A future byte-faithful mode would need to carry source
-tokens or the original document alongside SchemaPlain; it is a different
+tokens or the original document alongside PlainType; it is a different
 contract from schema round-tripping.
 
 Formatting is canonical and idempotent:
 
 ```text
-format(format(SchemaPlain, style), style) = format(SchemaPlain, style)
+format(format(PlainType, style), style) = format(PlainType, style)
 ```
 
 ## Version 2: conversational grammar
@@ -208,7 +214,7 @@ format(format(SchemaPlain, style), style) = format(SchemaPlain, style)
 A version-2 document starts with:
 
 ```plain
-***schemaplain 2***
+***plaintype 2***
 ```
 
 It contains exactly one root schema bullet. The root may be a named object, a
@@ -218,13 +224,13 @@ Blank lines and two-space indentation follow the same lexical rules as version
 
 The API and CLI use style names to select the surface version:
 
-- `structured` emits `***schemaplain 1***` and is the `from-json` default.
-- `conversational` emits `***schemaplain 2***`.
+- `structured` emits `***plaintype 1***` and is the `from-json` default.
+- `conversational` emits `***plaintype 2***`.
 - `format` with no style preserves the source header: version 1 becomes
   structured and version 2 remains conversational.
 - An explicit format style converts to that style and its corresponding header.
 
-Both headers are always accepted by `to-json`, `check`, and the public parser.
+Every header is always accepted by `to-json`, `check`, and the public parser.
 
 ### Object declarations
 
@@ -417,9 +423,147 @@ parseJson(toJsonSchema(fromJsonSchema(J, style))) = parseJson(J)
 ```
 
 The canonical examples are
-[`animal-identifier.conversational.schemaplain`](../examples/animal-identifier.conversational.schemaplain)
+[`animal-identifier.conversational.plaintype`](../examples/animal-identifier.conversational.plaintype)
 and its fixed-order
 [`animal-identifier.schema.json`](../examples/animal-identifier.schema.json), plus
 the recursive pair
-[`animal-family.conversational.schemaplain`](../examples/animal-family.conversational.schemaplain)
+[`animal-family.conversational.plaintype`](../examples/animal-family.conversational.plaintype)
 and [`animal-family.schema.json`](../examples/animal-family.schema.json).
+
+## Version 3: ***plain-aligned grammar
+
+Version 3 carries exactly the version-2 declaration model, but spells it with
+the conventions of the [***plain](https://plainlang.org/docs/language-guide/basic-syntax)
+specification language, so a PlainType file reads like a ***plain
+`***definitions***` section. It adds two annotation sentences, for `default` and
+`examples`, and it maps `>` comments to `$comment`.
+
+```plain
+---
+description: "Per-user display settings"
+---
+
+***plaintype 3***
+
+***definitions***
+
+> Shared by the web and desktop clients.
+- :DisplaySettings: How the app is displayed for one user.
+  - theme - The color theme - one of "light", "dark", or "system". Defaults to "system". For example: "dark".
+  - fontSize - The body font size in points - an integer between 8 and 72. Defaults to 14.
+  - displayName (optional) - The name shown in the header - a string between 1 and 40 characters. For example: "Ada" or "Grace Hopper".
+  - stylesheet (optional) - Extra CSS rules - a reference to [styles/custom.schema.json](styles/custom.schema.json).
+```
+
+### What comes from ***plain
+
+| ***plain convention | Version 3 |
+| --- | --- |
+| Optional YAML frontmatter between `---` fences, first in the file | Accepted before the header. It is module metadata: the compiler ignores it, and `format` reproduces it verbatim when the output style is `plain`. Other styles have nowhere to keep it and drop it. |
+| `***section***` headers | Declarations live in exactly one `***definitions***` section after the header. Any other section is an error, because a PlainType module only defines data. |
+| Concepts written `:ConceptName:` using letters, digits, `+`, `-`, `.`, and `_` | Every named schema (the root, union alternatives, and definitions) is a concept: `- :Animal: A reusable animal record.` References name the concept: `an :Animal:`, `an array of :Animal:`. |
+| Definitions start with the concept name; attributes are nested `Name - description` bullets | Properties are attributes: `- name - The animal's name - a string containing at least one character.` |
+| Lines starting with `>` are comments | A comment inside `***definitions***` describes the declaration below it and compiles to that schema's `$comment`. See [Comments](#comments). Comments before the section are module notes: they are ignored, and `format` does not reproduce them. |
+| Markdown links to files in the module's folder are linked resources | A `$ref` to a relative path inside the folder is written `a reference to [path](path)`. The link text must equal its target. Other references keep `a reference to "URI"`. |
+| Liquid templates expand textually before interpretation | PlainType parses the expanded text. `{{ variable }}` placeholders, as used by the demo's templates, must be filled in before compiling. |
+
+### Document shape
+
+The header comes first, after any frontmatter, followed by the
+`***definitions***` section. Its first bullet is the root schema. When the root
+is a named object, the following bullets are its reusable `$defs`, in order:
+
+```plain
+***plaintype 3***
+
+***definitions***
+
+- :AnimalFamily: A family tree for an animal.
+  - animal - The animal represented here - an :Animal:.
+  - parents (optional) - Its known parents - an array of :Animal:.
+  - offspring (optional) - Its known offspring - an array of :AnimalFamily:.
+
+- :Animal: A reusable animal record.
+  - name - The animal's name - a string containing at least one character.
+```
+
+That document expands in the version-2 fixed member order. `$defs` is placed
+after `required` and before `additionalProperties`, so the root's
+additional-properties directive stays the root's last child, above the
+definitions. A union root, a boolean marker, and `Exact JSON Schema:` cannot be
+followed by definitions.
+
+Concept names follow ***plain's character set. A `title` or `$defs` key outside
+it is still transported losslessly through `Exact JSON Schema:`. Property names
+keep the version-2 rule: safe names are bare, and every other name is a JSON
+string such as `"display name"`. The only declaration qualifier is
+`(optional)`.
+
+### Attributes
+
+A property is `name - description - constraint.`. A property without a
+constraint is a nested object whose attributes follow at the next indentation.
+The first ` - ` after the name separates it from the description, and the last
+unquoted ` - ` separates the description from the constraint. The constraint
+vocabulary is exactly version 2's, with concept tokens in references.
+
+### Defaults and examples
+
+A leaf may end with up to two annotation sentences, in this order:
+
+```plain
+  - theme - The color theme - one of "light" or "dark". Defaults to "light". For example: "dark".
+```
+
+| Sentence | JSON Schema member, after the constraint members |
+| --- | --- |
+| `Defaults to <JSON>.` | `default` |
+| `For example: <JSON list>.` | `examples`, a nonempty array |
+
+Values are strict JSON. An example list uses the same separators as inline
+enums: `"a"`, `"a" or "b"`, `"a", "b", or "c"`. Unlike enums, any JSON values
+are allowed, including objects, arrays, and repeats. A leaf whose `default` and
+`examples` appear in another order, or whose `examples` array is empty, uses
+the exact escape.
+
+### Comments
+
+JSON Schema's `$comment` is a note for schema maintainers with no validation
+effect. In version 3 it is written as `>` lines directly above the declaration
+it belongs to: a root, union, alternative, definition, nested object, or leaf.
+
+```plain
+> This is a rough draft.
+- :Button: A clickable control.
+  > Product wants this configurable later.
+  - borderColor - The color of its border - "red".
+```
+
+| Position | `$comment` member order |
+| --- | --- |
+| Object | after `description`, before `properties` |
+| Union | after `description`, before `oneOf` |
+| Leaf | after `description`, before the constraint members |
+
+Consecutive `>` lines join with line breaks, and a bare `>` is an empty line.
+One space after `>` is removed. Blank lines may separate a comment from its
+declaration, but a comment must have a declaration after it. A comment cannot
+describe a boolean marker, an `Exact JSON Schema:` clause, or an
+additional-properties directive; an exact schema carries its own `$comment`
+inside the JSON. A `$comment` in another position, or one containing control
+characters or trailing whitespace on a line, uses the exact escape.
+
+Comments between the header and `***definitions***` are module notes that do
+not belong to any schema. They are ignored and not reproduced by `format`. Use
+frontmatter for module notes that should survive formatting.
+
+### Version-3 round trips
+
+The lossless law and canonical formatting apply unchanged:
+
+```text
+parseJson(toJsonSchema(fromJsonSchema(J, "plain"))) = parseJson(J)
+format(format(PlainType, "plain"), "plain") = format(PlainType, "plain")
+```
+
+`format` converts between versions 2 and 3 without changing the JSON Schema.

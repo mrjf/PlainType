@@ -1,0 +1,18 @@
+***plaintype 3***
+
+***definitions***
+
+- :AnimalIdentifier: An identifier attached to an animal. Exactly one of:
+  - :Microchip: Identification using an implanted microchip.
+    - kind - The identifier kind - "microchip".
+    - number - The microchip number - a string of exactly 15 digits.
+    - implantedOn (optional) - The implantation date - a date in YYYY-MM-DD format.
+  - :CollarTag: Identification using a collar tag.
+    - kind - The identifier kind - "collar-tag".
+    - text - The text printed on the tag - a string between 1 and 40 characters.
+    - phone (optional) - A contact phone number - a string, or null.
+    - Additional properties allowed
+  - :WildlifeBand: Identification using a research band.
+    - kind - The identifier kind - "wildlife-band".
+    - bandId - The band identifier - a string containing at least one character.
+    - organization - The responsible organization - a string containing at least one character.

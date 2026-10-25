@@ -22,8 +22,13 @@ import {
   type JsonObjectEntry,
 } from "./json.js";
 
-const HEADER_V1 = "***schemaplain 1***";
-const HEADER_V2 = "***schemaplain 2***";
+const HEADER_V1 = "***plaintype 1***";
+const HEADER_V2 = "***plaintype 2***";
+const HEADER_V3 = "***plaintype 3***";
+const V3_DEFINITIONS_SECTION = "***definitions***";
+const V3_DEFAULT_LEAD = ". Defaults to ";
+const V3_EXAMPLES_LEAD = ". For example: ";
+const FRONTMATTER_FENCE = "---";
 const ALLOW_ALL = "Every instance is accepted.";
 const DENY_ALL = "No instance is accepted.";
 const EMPTY_SCHEMA = "No constraints or annotations are specified.";
@@ -37,9 +42,11 @@ const V2_ADDITIONAL_UNSPECIFIED = "Additional properties unspecified";
 const V2_DEFINITIONS = "Definitions:";
 const V2_UNION_SUFFIX = " Exactly one of:";
 
-type SchemaPlainVersion = 1 | 2;
+type PlainTypeVersion = 1 | 2 | 3;
+/** The two grammars that share the compact declaration model. */
+type ConversationalVersion = 2 | 3;
 
-export type RenderStyle = "structured" | "conversational";
+export type RenderStyle = "structured" | "conversational" | "plain";
 
 export interface FromJsonOptions {
   /**
@@ -49,7 +56,8 @@ export interface FromJsonOptions {
   readonly defaultDialect?: string | null;
   /**
    * Canonical surface form. `structured` uses the v1 grammar and is the
-   * default; `conversational` uses the compact v2 grammar.
+   * default; `conversational` uses the compact v2 grammar; `plain` uses the
+   * v3 grammar, which follows ***plain's concept and section syntax.
    */
   readonly style?: RenderStyle;
 }
@@ -59,12 +67,12 @@ export interface ToJsonOptions {
   readonly space?: number;
 }
 
-export class SchemaPlainSyntaxError extends SyntaxError {
+export class PlainTypeSyntaxError extends SyntaxError {
   public readonly line: number;
 
   public constructor(message: string, line: number) {
     super(`${message} at line ${line}`);
-    this.name = "SchemaPlainSyntaxError";
+    this.name = "PlainTypeSyntaxError";
     this.line = line;
   }
 }
@@ -91,7 +99,7 @@ const DRAFT_2020_12_PROFILE: RenderProfile = {
 
 const NO_PROFILE: RenderProfile = { values: [], schemas: [], maps: [], arrays: [] };
 
-/** Convert a JSON Schema JSON document into canonical SchemaPlain. */
+/** Convert a JSON Schema JSON document into canonical PlainType. */
 export function fromJsonSchema(json: string, options: FromJsonOptions = {}): string {
   const schema = parseJson(json);
   if (!isSchemaNode(schema)) {
@@ -100,62 +108,168 @@ export function fromJsonSchema(json: string, options: FromJsonOptions = {}): str
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
   const style = options.style ?? "structured";
-  const lines = style === "conversational"
-    ? [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect)]
-    : [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
-  return `${lines.join("\n")}\n`;
+  return `${renderDocumentLines(schema, dialect, style).join("\n")}\n`;
 }
 
-/** Convert SchemaPlain into canonical JSON Schema JSON. */
+function renderDocumentLines(schema: JsonNode, dialect: string | null, style: RenderStyle): string[] {
+  switch (style) {
+    case "plain":
+      return [HEADER_V3, "", V3_DEFINITIONS_SECTION, "", ...renderSchemaV2(schema, 0, dialect, 3)];
+    case "conversational":
+      return [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect, 2)];
+    case "structured":
+      return [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
+  }
+}
+
+/** Convert PlainType into canonical JSON Schema JSON. */
 export function toJsonSchema(source: string, options: ToJsonOptions = {}): string {
-  const schema = parseSchemaPlain(source);
+  const schema = parsePlainType(source);
   const space = options.space ?? 2;
   return `${stringifyJson(schema, space)}\n`;
 }
 
-/** Parse SchemaPlain into the lossless JSON AST used by the converter. */
-export function parseSchemaPlain(source: string): JsonNode {
-  return parseSchemaPlainDocument(source).schema;
+/** Parse PlainType into the lossless JSON AST used by the converter. */
+export function parsePlainType(source: string): JsonNode {
+  return parsePlainTypeDocument(source).schema;
 }
 
-function parseSchemaPlainDocument(source: string): { version: SchemaPlainVersion; schema: JsonNode } {
+interface ParsedDocument {
+  readonly version: PlainTypeVersion;
+  readonly schema: JsonNode;
+  /** The verbatim YAML frontmatter block, fences included (version 3 only). */
+  readonly frontmatter: string | null;
+}
+
+function parsePlainTypeDocument(source: string): ParsedDocument {
   const normalized = source.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const lines = normalized.split("\n");
-  let headerIndex = 0;
-  while (headerIndex < lines.length && lines[headerIndex]?.trim() === "") {
-    if (lines[headerIndex]?.includes("\t")) {
-      throw new SchemaPlainSyntaxError("Tabs are not allowed for indentation", headerIndex + 1);
-    }
-    headerIndex += 1;
+  let headerIndex = skipBlankLines(lines, 0);
+
+  // ***plain modules may open with YAML frontmatter. It is module metadata, not
+  // schema data, so it is carried through formatting but never compiled.
+  let frontmatter: string | null = null;
+  const frontmatterLine = headerIndex + 1;
+  if (lines[headerIndex] === FRONTMATTER_FENCE) {
+    const close = lines.indexOf(FRONTMATTER_FENCE, headerIndex + 1);
+    if (close < 0) throw new PlainTypeSyntaxError("Unclosed YAML frontmatter", frontmatterLine);
+    frontmatter = lines.slice(headerIndex, close + 1).join("\n");
+    headerIndex = skipBlankLines(lines, close + 1);
   }
+
   const header = lines[headerIndex];
-  const version: SchemaPlainVersion = header === HEADER_V1
+  const version: PlainTypeVersion = header === HEADER_V1
     ? 1
     : header === HEADER_V2
       ? 2
-      : (() => {
-          throw new SchemaPlainSyntaxError(`Expected ${HEADER_V1} or ${HEADER_V2}`, headerIndex + 1);
-        })();
-
-  const bullets = parseBullets(lines, headerIndex + 1);
-  if (bullets.length === 0) {
-    throw new SchemaPlainSyntaxError("Expected at least one schema clause", headerIndex + 2);
+      : header === HEADER_V3
+        ? 3
+        : (() => {
+            throw new PlainTypeSyntaxError(`Expected ${HEADER_V1}, ${HEADER_V2}, or ${HEADER_V3}`, headerIndex + 1);
+          })();
+  if (frontmatter !== null && version !== 3) {
+    throw new PlainTypeSyntaxError(`YAML frontmatter requires ${HEADER_V3}`, frontmatterLine);
   }
-  const schema = version === 2 ? schemaFromV2Bullets(bullets) : schemaFromBullets(bullets);
-  return { version, schema };
+
+  const v3Body = version === 3 ? stripV3SectionsAndComments(lines, headerIndex + 1) : null;
+  const bullets = parseBullets(v3Body?.lines ?? lines, headerIndex + 1);
+  if (bullets.length === 0) {
+    throw new PlainTypeSyntaxError("Expected at least one schema clause", headerIndex + 2);
+  }
+  const schema = v3Body !== null
+    ? schemaFromV3Bullets(bullets, v3Body.comments)
+    : version === 2
+      ? schemaFromV2Bullets(bullets)
+      : schemaFromBullets(bullets);
+  return { version, schema, frontmatter };
 }
 
-/** Canonicalize an already-authored SchemaPlain document. */
-export function formatSchemaPlain(source: string, options: FromJsonOptions = {}): string {
-  const parsed = parseSchemaPlainDocument(source);
+function skipBlankLines(lines: readonly string[], start: number): number {
+  let index = start;
+  while (index < lines.length && lines[index]?.trim() === "") {
+    if (lines[index]?.includes("\t")) {
+      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", index + 1);
+    }
+    index += 1;
+  }
+  return index;
+}
+
+/**
+ * Version 3 follows ***plain's file layout: `>` lines are comments, and the
+ * declarations live in the one `***definitions***` section. Both are blanked
+ * here (keeping line numbers) so the shared bullet parser sees only clauses.
+ *
+ * A comment inside the section describes the declaration that follows it and
+ * becomes that schema's `$comment`; consecutive lines join with line breaks.
+ * Comments before the section are module notes and are not compiled.
+ */
+function stripV3SectionsAndComments(
+  lines: readonly string[],
+  start: number,
+): { lines: string[]; comments: Map<number, string> } {
+  const result = [...lines];
+  const comments = new Map<number, string>();
+  let pending: string[] = [];
+  let pendingLine = 0;
+  let sawSection = false;
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    const comment = /^ *>( ?)([\s\S]*)$/.exec(line);
+    if (comment !== null) {
+      if (line.includes("\t")) throw new PlainTypeSyntaxError("Tabs are not allowed in comments", index + 1);
+      if (sawSection) {
+        if (pending.length === 0) pendingLine = index + 1;
+        pending.push(comment[2] ?? "");
+      }
+      result[index] = "";
+      continue;
+    }
+    const section = /^\*\*\*([^*]+)\*\*\*$/.exec(line);
+    if (section !== null) {
+      if (line !== V3_DEFINITIONS_SECTION) {
+        throw new PlainTypeSyntaxError(
+          `A PlainType module contains only ${V3_DEFINITIONS_SECTION}; found ***${section[1] ?? ""}***`,
+          index + 1,
+        );
+      }
+      if (sawSection) throw new PlainTypeSyntaxError(`Duplicate ${V3_DEFINITIONS_SECTION} section`, index + 1);
+      sawSection = true;
+      result[index] = "";
+      continue;
+    }
+    if (!sawSection && line.trim() !== "") {
+      throw new PlainTypeSyntaxError(`Expected ${V3_DEFINITIONS_SECTION} before the first definition`, index + 1);
+    }
+    if (line.trim() !== "" && pending.length > 0) {
+      comments.set(index + 1, pending.join("\n"));
+      pending = [];
+    }
+  }
+  if (!sawSection) throw new PlainTypeSyntaxError(`Expected a ${V3_DEFINITIONS_SECTION} section`, start + 1);
+  if (pending.length > 0) {
+    throw new PlainTypeSyntaxError("A comment must be followed by the declaration it describes", pendingLine);
+  }
+  return { lines: result, comments };
+}
+
+const STYLE_FOR_VERSION: Readonly<Record<PlainTypeVersion, RenderStyle>> = {
+  1: "structured",
+  2: "conversational",
+  3: "plain",
+};
+
+/** Canonicalize an already-authored PlainType document. */
+export function formatPlainType(source: string, options: FromJsonOptions = {}): string {
+  const parsed = parsePlainTypeDocument(source);
   const schema = parsed.schema;
   const fallbackDialect = options.defaultDialect === undefined ? DRAFT_2020_12 : options.defaultDialect;
   const dialect = dialectDeclaredBy(schema) ?? fallbackDialect;
-  const style = options.style ?? (parsed.version === 2 ? "conversational" : "structured");
-  const lines = style === "conversational"
-    ? [HEADER_V2, "", ...renderSchemaV2(schema, 0, dialect)]
-    : [HEADER_V1, "", ...renderSchema(schema, 0, dialect, style)];
-  return `${lines.join("\n")}\n`;
+  const style = options.style ?? STYLE_FOR_VERSION[parsed.version];
+  const lines = renderDocumentLines(schema, dialect, style);
+  // Frontmatter is v3 module metadata; other grammars have nowhere to keep it.
+  const frontmatter = style === "plain" && parsed.frontmatter !== null ? [parsed.frontmatter, ""] : [];
+  return `${[...frontmatter, ...lines].join("\n")}\n`;
 }
 
 function renderSchema(
@@ -520,6 +634,8 @@ function renderSchemaArray(
 interface V2ObjectPlan {
   readonly name: string | null;
   readonly description: string;
+  /** Version 3: `$comment`, rendered as `>` lines above the declaration. */
+  readonly comment: string | null;
   readonly properties: JsonObject;
   readonly requiredNames: readonly string[];
   readonly definitions: JsonObject | null;
@@ -528,12 +644,16 @@ interface V2ObjectPlan {
 
 interface V2LeafPlan {
   readonly description: string;
+  readonly comment: string | null;
   readonly constraint: string;
+  /** Version 3 only: trailing ` Defaults to …. For example: ….` sentences. */
+  readonly annotations: string;
 }
 
 interface V2UnionPlan {
   readonly name: string;
   readonly description: string;
+  readonly comment: string | null;
   readonly alternatives: readonly JsonNode[];
 }
 
@@ -547,6 +667,8 @@ interface V2Declaration {
 interface V2ReferenceContext {
   readonly rootName: string | null;
   readonly definitionNames: ReadonlySet<string>;
+  /** Version 3: `$comment` text keyed by the line of the declaration it precedes. */
+  readonly comments?: ReadonlyMap<number, string>;
 }
 
 /** Render the compact version-2 conversational grammar, with an exact universal escape. */
@@ -554,6 +676,7 @@ function renderSchemaV2(
   node: JsonNode,
   depth: number,
   inheritedDialect: string | null,
+  version: ConversationalVersion,
 ): string[] {
   if (node.type === "boolean") {
     return [`${indent(depth)}- ${node.value ? ALLOW_ALL : DENY_ALL}`];
@@ -563,10 +686,10 @@ function renderSchemaV2(
   const context = v2ReferenceContextFromSchema(node);
   if (context === null) return renderV2ExactSchema(node, depth);
   if (dialect === DRAFT_2020_12) {
-    const union = v2UnionPlan(node);
-    if (union !== null) return renderV2Union(union, depth, dialect, context);
-    const object = v2ObjectPlan(node, true, context, true);
-    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context);
+    const union = v2UnionPlan(node, version);
+    if (union !== null) return renderV2Union(union, depth, dialect, context, version);
+    const object = v2ObjectPlan(node, true, context, true, version);
+    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
   }
   return renderV2ExactSchema(node, depth);
 }
@@ -576,12 +699,13 @@ function renderV2SchemaAlternative(
   depth: number,
   dialect: string | null,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
   if (node.type === "object" && dialect === DRAFT_2020_12) {
-    const union = v2UnionPlan(node);
-    if (union !== null) return renderV2Union(union, depth, dialect, context);
-    const object = v2ObjectPlan(node, true, context, false);
-    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context);
+    const union = v2UnionPlan(node, version);
+    if (union !== null) return renderV2Union(union, depth, dialect, context, version);
+    const object = v2ObjectPlan(node, true, context, false, version);
+    if (object !== null) return renderV2Object(object, depth, dialect, false, false, context, version);
   }
   return renderV2ExactSchema(node, depth);
 }
@@ -595,12 +719,14 @@ function v2ObjectPlan(
   named: boolean,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
 ): V2ObjectPlan | null {
   let index = 0;
   let name: string | null = null;
   if (named) {
     const title = node.entries[index];
     if (title?.key !== "title" || title.value.type !== "string") return null;
+    if (version === 3 && !isConceptName(title.value.value)) return null;
     name = title.value.value;
     index += 1;
   }
@@ -620,6 +746,9 @@ function v2ObjectPlan(
     return null;
   }
   index += 1;
+
+  const comment = version === 3 ? v3Comment(node.entries[index]) : null;
+  if (comment !== null) index += 1;
 
   const properties = node.entries[index];
   if (
@@ -656,7 +785,8 @@ function v2ObjectPlan(
       !allowDefinitions ||
       definitionsEntry.value.type !== "object" ||
       !schemaMapContainsOnlySchemas(definitionsEntry.value) ||
-      new Set(definitionsEntry.value.entries.map(({ key }) => key)).size !== definitionsEntry.value.entries.length
+      new Set(definitionsEntry.value.entries.map(({ key }) => key)).size !== definitionsEntry.value.entries.length ||
+      (version === 3 && !definitionsEntry.value.entries.every(({ key }) => isConceptName(key)))
     ) {
       return null;
     }
@@ -674,9 +804,9 @@ function v2ObjectPlan(
   if (index !== node.entries.length) return null;
 
   for (const property of properties.value.entries) {
-    if (v2LeafPlan(property.value, context) === null) {
+    if (v2LeafPlan(property.value, context, version) === null) {
       if (property.value.type !== "object") return null;
-      const nestedPlan = v2ObjectPlan(property.value, false, context, false);
+      const nestedPlan = v2ObjectPlan(property.value, false, context, false, version);
       if (nestedPlan === null || v2ObjectDescriptionLooksLikeLeaf(nestedPlan)) return null;
     }
   }
@@ -685,7 +815,7 @@ function v2ObjectPlan(
     for (const definition of definitions.entries) {
       if (
         definition.value.type !== "object" ||
-        v2ObjectPlan(definition.value, false, context, false) === null
+        v2ObjectPlan(definition.value, false, context, false, version) === null
       ) {
         return null;
       }
@@ -695,6 +825,7 @@ function v2ObjectPlan(
   return {
     name,
     description: description.value.value,
+    comment,
     properties: properties.value,
     requiredNames,
     definitions,
@@ -707,7 +838,7 @@ function v2ObjectDescriptionLooksLikeLeaf(plan: V2ObjectPlan): boolean {
     lastUnquotedSeparator(plan.description, " - ") >= 0;
 }
 
-function v2LeafPlan(node: JsonNode, context: V2ReferenceContext): V2LeafPlan | null {
+function v2LeafPlan(node: JsonNode, context: V2ReferenceContext, version: ConversationalVersion): V2LeafPlan | null {
   if (node.type !== "object") return null;
   const description = node.entries[0];
   if (
@@ -718,17 +849,52 @@ function v2LeafPlan(node: JsonNode, context: V2ReferenceContext): V2LeafPlan | n
   ) {
     return null;
   }
-  const constraint = renderV2Constraint(node.entries.slice(1), context);
+  let rest = node.entries.slice(1);
+  const comment = version === 3 ? v3Comment(rest[0]) : null;
+  if (comment !== null) rest = rest.slice(1);
+  let annotations = "";
+  if (version === 3) {
+    // Fixed order after the constraint members: `default`, then `examples`.
+    const examples = rest.at(-1);
+    if (examples?.key === "examples" && examples.value.type === "array" && examples.value.items.length > 0) {
+      annotations = `${V3_EXAMPLES_LEAD}${joinNaturalList(examples.value.items.map((item) => stringifyJson(item)))}`;
+      rest = rest.slice(0, -1);
+    }
+    const fallback = rest.at(-1);
+    if (fallback?.key === "default") {
+      annotations = `${V3_DEFAULT_LEAD}${stringifyJson(fallback.value)}${annotations}`;
+      rest = rest.slice(0, -1);
+    }
+  }
+  const constraint = renderV2Constraint(rest, context, version);
   return constraint === null
     ? null
-    : { description: description.value.value, constraint };
+    : { description: description.value.value, comment, constraint, annotations };
 }
 
-function v2UnionPlan(node: JsonObject): V2UnionPlan | null {
-  if (node.entries.length !== 3) return null;
-  const [title, description, oneOf] = node.entries;
+/** A `$comment` member that `>` lines can carry exactly. */
+function v3Comment(entry: JsonObjectEntry | undefined): string | null {
+  if (entry?.key !== "$comment" || entry.value.type !== "string") return null;
+  const value = entry.value.value;
+  const linesSafe = value.split("\n").every((line) =>
+    !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(line) && !/\s$/u.test(line)
+  );
+  return linesSafe && !hasUnpairedSurrogate(value) ? value : null;
+}
+
+function renderV3Comment(comment: string | null, depth: number): string[] {
+  if (comment === null) return [];
+  return comment.split("\n").map((line) => `${indent(depth)}>${line === "" ? "" : ` ${line}`}`);
+}
+
+function v2UnionPlan(node: JsonObject, version: ConversationalVersion): V2UnionPlan | null {
+  const comment = version === 3 && node.entries.length === 4 ? v3Comment(node.entries[2]) : null;
+  if (node.entries.length !== (comment === null ? 3 : 4)) return null;
+  const [title, description] = node.entries;
+  const oneOf = node.entries.at(-1);
   if (
     title?.key !== "title" || title.value.type !== "string" ||
+    (version === 3 && !isConceptName(title.value.value)) ||
     description?.key !== "description" || description.value.type !== "string" ||
     description.value.value === "" || !isSafeV2InlineDescription(description.value.value) ||
     oneOf?.key !== "oneOf" || oneOf.value.type !== "array" || oneOf.value.items.length === 0 ||
@@ -739,6 +905,7 @@ function v2UnionPlan(node: JsonObject): V2UnionPlan | null {
   return {
     name: title.value.value,
     description: description.value.value,
+    comment,
     alternatives: oneOf.value.items,
   };
 }
@@ -748,12 +915,12 @@ function renderV2Union(
   depth: number,
   dialect: string | null,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
-  const lines = [
-    `${indent(depth)}- ${renderPropertyName(plan.name)}: ${plan.description}${V2_UNION_SUFFIX}`,
-  ];
+  const head = version === 3 ? `${conceptToken(plan.name)} ` : `${renderPropertyName(plan.name)}: `;
+  const lines = [...renderV3Comment(plan.comment, depth), `${indent(depth)}- ${head}${plan.description}${V2_UNION_SUFFIX}`];
   for (const alternative of plan.alternatives) {
-    lines.push(...renderV2SchemaAlternative(alternative, depth + 1, dialect, context));
+    lines.push(...renderV2SchemaAlternative(alternative, depth + 1, dialect, context, version));
   }
   return lines;
 }
@@ -765,15 +932,22 @@ function renderV2Object(
   optional: boolean,
   propertyContext: boolean,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string[] {
   const marker = propertyContext && optional ? " (optional)" : "";
-  const name = plan.name === null ? "" : renderPropertyName(plan.name);
-  const lines = [`${indent(depth)}- ${name}${marker}: ${plan.description}`];
+  const name = plan.name === null ? "" : plan.name;
+  // v3 names schemas as ***plain concepts and properties as `Name - description` attributes.
+  const head = version === 2
+    ? `${renderPropertyName(name)}${marker}: `
+    : propertyContext
+      ? `${renderPropertyName(name)}${marker} - `
+      : `${conceptToken(name)} `;
+  const lines = [...renderV3Comment(plan.comment, depth), `${indent(depth)}- ${head}${plan.description}`];
   const required = new Set(plan.requiredNames);
   for (const property of plan.properties.entries) {
     const propertyOptional = !required.has(property.key);
     const nestedObject = property.value.type === "object"
-      ? v2ObjectPlan(property.value, false, context, false)
+      ? v2ObjectPlan(property.value, false, context, false, version)
       : null;
     if (nestedObject !== null) {
       lines.push(...renderV2Object(
@@ -783,33 +957,44 @@ function renderV2Object(
         propertyOptional,
         true,
         context,
+        version,
       ));
       continue;
     }
-    const leaf = v2LeafPlan(property.value, context);
+    const leaf = v2LeafPlan(property.value, context, version);
     if (leaf === null) throw new TypeError("A planned v2 property became unrenderable");
     const optionalMarker = propertyOptional ? " (optional)" : "";
+    const separator = version === 2 ? ":" : " -";
+    lines.push(...renderV3Comment(leaf.comment, depth + 1));
     lines.push(
-      `${indent(depth + 1)}- ${renderPropertyName(property.key)}${optionalMarker}: ${leaf.description} - ${leaf.constraint}.`,
+      `${indent(depth + 1)}- ${renderPropertyName(property.key)}${optionalMarker}${separator} ${leaf.description} - ${leaf.constraint}${leaf.annotations}.`,
     );
   }
+  const definitionLines: string[] = [];
   if (plan.definitions !== null) {
-    lines.push("");
-    lines.push(`${indent(depth + 1)}- ${V2_DEFINITIONS}`);
+    // v2 nests definitions under the root; v3 lists them beside it in ***definitions***.
+    const definitionDepth = version === 2 ? depth + 2 : depth;
+    if (version === 2) {
+      lines.push("");
+      lines.push(`${indent(depth + 1)}- ${V2_DEFINITIONS}`);
+    }
     for (const definition of plan.definitions.entries) {
       if (definition.value.type !== "object") {
         throw new TypeError("A planned v2 definition became unrenderable");
       }
-      const definitionPlan = v2ObjectPlan(definition.value, false, context, false);
+      const definitionPlan = v2ObjectPlan(definition.value, false, context, false, version);
       if (definitionPlan === null) throw new TypeError("A planned v2 definition became unrenderable");
-      lines.push(...renderV2Object(
+      const rendered = renderV2Object(
         { ...definitionPlan, name: definition.key },
-        depth + 2,
+        definitionDepth,
         dialect,
         false,
         false,
         context,
-      ));
+        version,
+      );
+      if (version === 2) lines.push(...rendered);
+      else definitionLines.push("", ...rendered);
     }
   }
   if (plan.additionalMode === "allowed") {
@@ -817,15 +1002,16 @@ function renderV2Object(
   } else if (plan.additionalMode === "unspecified") {
     lines.push(`${indent(depth + 1)}- ${V2_ADDITIONAL_UNSPECIFIED}`);
   }
-  return lines;
+  return [...lines, ...definitionLines];
 }
 
 function renderV2Constraint(
   entries: readonly JsonObjectEntry[],
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): string | null {
   if (entries.length === 1 && entries[0]?.key === "$ref" && entries[0].value.type === "string") {
-    return renderV2Reference(entries[0].value.value, context);
+    return renderV2Reference(entries[0].value.value, context, version);
   }
   if (
     entries.length === 2 &&
@@ -834,8 +1020,9 @@ function renderV2Constraint(
     entries[1].value.entries.length === 1 &&
     entries[1].value.entries[0]?.key === "$ref" && entries[1].value.entries[0].value.type === "string"
   ) {
-    const name = renderV2ReferenceName(entries[1].value.entries[0].value.value, context);
-    return name === null ? null : `an array of ${name}`;
+    const name = renderV2ReferenceName(entries[1].value.entries[0].value.value, context, version);
+    if (name === null) return null;
+    return `an array of ${version === 3 ? conceptToken(name) : name}`;
   }
   if (entries.length === 1 && entries[0]?.key === "const") {
     return stringifyJson(entries[0].value);
@@ -928,26 +1115,49 @@ function renderV2Constraint(
   return null;
 }
 
-function renderV2Reference(reference: string, context: V2ReferenceContext): string {
-  const name = renderV2ReferenceName(reference, context);
-  return name === null
-    ? `a reference to ${jsonString(reference)}`
-    : `${v2IndefiniteArticle(name)} ${name}`;
+function renderV2Reference(reference: string, context: V2ReferenceContext, version: ConversationalVersion): string {
+  const name = renderV2ReferenceName(reference, context, version);
+  if (name !== null) {
+    return `${v2IndefiniteArticle(name)} ${version === 3 ? conceptToken(name) : name}`;
+  }
+  // v3 writes a local file reference as a ***plain linked resource.
+  if (version === 3 && isLinkableReference(reference)) return `a reference to [${reference}](${reference})`;
+  return `a reference to ${jsonString(reference)}`;
 }
 
-function renderV2ReferenceName(reference: string, context: V2ReferenceContext): string | null {
+function renderV2ReferenceName(
+  reference: string,
+  context: V2ReferenceContext,
+  version: ConversationalVersion,
+): string | null {
+  const safe = version === 3 ? isConceptName : isSafeV2SchemaName;
   if (
     reference === "#" &&
     context.rootName !== null &&
-    isSafeV2SchemaName(context.rootName)
+    safe(context.rootName)
   ) {
     return context.rootName;
   }
   const prefix = "#/$defs/";
   if (!reference.startsWith(prefix)) return null;
   const token = reference.slice(prefix.length);
-  if (!isSafeV2SchemaName(token) || !context.definitionNames.has(token)) return null;
+  if (!safe(token) || !context.definitionNames.has(token)) return null;
   return token;
+}
+
+/** ***plain concept names: letters, digits, `+`, `-`, `.`, and `_`. */
+function isConceptName(name: string): boolean {
+  return /^[A-Za-z0-9+._-]+$/.test(name);
+}
+
+function conceptToken(name: string): string {
+  return `:${name}:`;
+}
+
+/** A relative path inside the module's folder, which ***plain can attach as a linked resource. */
+function isLinkableReference(reference: string): boolean {
+  return /^(?![A-Za-z][A-Za-z0-9+.-]*:)(?!\/)[A-Za-z0-9._~\/-]+$/.test(reference) &&
+    !reference.split("/").includes("..");
 }
 
 function v2IndefiniteArticle(name: string): "a" | "an" {
@@ -1004,12 +1214,56 @@ function joinNaturalList(values: readonly string[]): string {
 
 function schemaFromV2Bullets(bullets: readonly Bullet[]): JsonNode {
   if (bullets.length !== 1) {
-    throw new SchemaPlainSyntaxError("A version-2 document needs exactly one root schema declaration", bullets[1]?.line ?? bullets[0]?.line ?? 1);
+    throw new PlainTypeSyntaxError("A version-2 document needs exactly one root schema declaration", bullets[1]?.line ?? bullets[0]?.line ?? 1);
   }
   const bullet = bullets[0];
-  if (bullet === undefined) throw new SchemaPlainSyntaxError("Expected a schema declaration", 1);
+  if (bullet === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
   const context = v2ReferenceContextFromBullet(bullet);
-  return schemaFromV2Bullet(bullet, context, true);
+  return schemaFromV2Bullet(bullet, context, true, 2);
+}
+
+/**
+ * Version 3: the `***definitions***` list holds the root schema first and its
+ * reusable `$defs` after it, each written as a ***plain concept definition.
+ */
+function schemaFromV3Bullets(bullets: readonly Bullet[], comments: ReadonlyMap<number, string>): JsonNode {
+  const [root, ...definitions] = bullets;
+  if (root === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
+  const context = { ...v3ReferenceContextFromBullets(root, definitions), comments };
+  if (isV2MarkerClause(root.text)) {
+    if (definitions[0] !== undefined) {
+      throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
+    }
+    return schemaFromV2Bullet(root, context, false, 3);
+  }
+  const declaration = parseV3ConceptDeclaration(root.text, root.line);
+  if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
+    if (definitions[0] !== undefined) {
+      throw new PlainTypeSyntaxError("Reusable definitions need a named object as the first definition", definitions[0].line);
+    }
+    return schemaFromV2Bullet(root, context, false, 3);
+  }
+  return schemaFromV2Object(declaration, root, true, context, false, 3, definitions);
+}
+
+function isV2MarkerClause(text: string): boolean {
+  return text === ALLOW_ALL || text === DENY_ALL || text.startsWith(`${V2_EXACT_SCHEMA_LEAD} `);
+}
+
+function v3ReferenceContextFromBullets(root: Bullet, definitions: readonly Bullet[]): V2ReferenceContext {
+  const rootName = isV2MarkerClause(root.text) ? null : parseV3ConceptDeclaration(root.text, root.line).name;
+  const definitionNames = new Set<string>();
+  for (const definitionBullet of definitions) {
+    const definition = parseV3ConceptDeclaration(definitionBullet.text, definitionBullet.line);
+    if (definitionNames.has(definition.name)) {
+      throw new PlainTypeSyntaxError(`Duplicate definition ${conceptToken(definition.name)}`, definitionBullet.line);
+    }
+    if (definition.name === rootName) {
+      throw new PlainTypeSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
+    }
+    definitionNames.add(definition.name);
+  }
+  return { rootName, definitionNames };
 }
 
 function v2ReferenceContextFromBullet(bullet: Bullet): V2ReferenceContext {
@@ -1023,16 +1277,16 @@ function v2ReferenceContextFromBullet(bullet: Bullet): V2ReferenceContext {
   const root = parseV2Declaration(bullet.text, bullet.line);
   const definitionsSections = bullet.children.filter(({ text }) => text === V2_DEFINITIONS);
   if (definitionsSections.length > 1) {
-    throw new SchemaPlainSyntaxError("An object may have only one Definitions section", definitionsSections[1]?.line ?? bullet.line);
+    throw new PlainTypeSyntaxError("An object may have only one Definitions section", definitionsSections[1]?.line ?? bullet.line);
   }
   const definitionNames = new Set<string>();
   for (const definitionBullet of definitionsSections[0]?.children ?? []) {
     const definition = parseV2Declaration(definitionBullet.text, definitionBullet.line);
     if (definitionNames.has(definition.name)) {
-      throw new SchemaPlainSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
+      throw new PlainTypeSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
     }
     if (definition.name === root.name) {
-      throw new SchemaPlainSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
+      throw new PlainTypeSyntaxError("A definition cannot have the same name as the root schema", definitionBullet.line);
     }
     definitionNames.add(definition.name);
   }
@@ -1043,7 +1297,11 @@ function schemaFromV2Bullet(
   bullet: Bullet,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
 ): JsonNode {
+  if (isV2MarkerClause(bullet.text) && context.comments?.has(bullet.line)) {
+    throw new PlainTypeSyntaxError("A comment cannot describe this clause; put $comment inside an exact JSON Schema", bullet.line);
+  }
   if (bullet.text === ALLOW_ALL || bullet.text === DENY_ALL) {
     requireNoChildren(bullet);
     return { type: "boolean", value: bullet.text === ALLOW_ALL };
@@ -1053,32 +1311,35 @@ function schemaFromV2Bullet(
     requireNoChildren(bullet);
     const schema = parseEmbeddedJson(bullet.text.slice(exactPrefix.length), bullet.line);
     if (!isSchemaNode(schema)) {
-      throw new SchemaPlainSyntaxError("An exact JSON Schema must be an object or boolean", bullet.line);
+      throw new PlainTypeSyntaxError("An exact JSON Schema must be an object or boolean", bullet.line);
     }
     return schema;
   }
 
-  const declaration = parseV2Declaration(bullet.text, bullet.line);
+  const declaration = version === 3
+    ? parseV3ConceptDeclaration(bullet.text, bullet.line)
+    : parseV2Declaration(bullet.text, bullet.line);
   if (declaration.optional) {
-    throw new SchemaPlainSyntaxError("A root schema or alternative cannot be optional", bullet.line);
+    throw new PlainTypeSyntaxError("A root schema or alternative cannot be optional", bullet.line);
   }
 
   if (!declaration.body.endsWith(V2_UNION_SUFFIX)) {
-    return schemaFromV2Object(declaration, bullet, true, context, allowDefinitions);
+    return schemaFromV2Object(declaration, bullet, true, context, allowDefinitions, version);
   }
   const description = declaration.body.slice(0, -V2_UNION_SUFFIX.length);
   if (description === "" || !isSafeV2InlineDescription(description)) {
-    throw new SchemaPlainSyntaxError("A named alternative schema needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("A named alternative schema needs a safe inline description", bullet.line);
   }
   if (bullet.children.length === 0) {
-    throw new SchemaPlainSyntaxError("'exactly one of:' needs at least one alternative", bullet.line);
+    throw new PlainTypeSyntaxError("'exactly one of:' needs at least one alternative", bullet.line);
   }
   return objectNode([
     { key: "title", value: { type: "string", value: declaration.name } },
     { key: "description", value: { type: "string", value: description } },
+    ...commentEntries(bullet, context),
     {
       key: "oneOf",
-      value: arrayNode(bullet.children.map((child) => schemaFromV2Bullet(child, context, false))),
+      value: arrayNode(bullet.children.map((child) => schemaFromV2Bullet(child, context, false, version))),
     },
   ]);
 }
@@ -1089,9 +1350,12 @@ function schemaFromV2Object(
   named: boolean,
   context: V2ReferenceContext,
   allowDefinitions: boolean,
+  version: ConversationalVersion,
+  /** Version 3: the root's sibling definitions from the ***definitions*** list. */
+  siblingDefinitions: readonly Bullet[] = [],
 ): JsonObject {
   if (declaration.body === "" || !isSafeV2InlineDescription(declaration.body)) {
-    throw new SchemaPlainSyntaxError("An object declaration needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("An object declaration needs a safe inline description", bullet.line);
   }
   const properties: JsonObjectEntry[] = [];
   const required: JsonNode[] = [];
@@ -1103,43 +1367,46 @@ function schemaFromV2Object(
   for (const [index, child] of bullet.children.entries()) {
     if (child.text === V2_ADDITIONAL_ALLOWED || child.text === V2_ADDITIONAL_UNSPECIFIED) {
       requireNoChildren(child);
+      if (context.comments?.has(child.line)) {
+        throw new PlainTypeSyntaxError("A comment cannot describe an additional-properties directive", child.line);
+      }
       if (sawAdditionalDirective) {
-        throw new SchemaPlainSyntaxError("An object may have only one additional-properties directive", child.line);
+        throw new PlainTypeSyntaxError("An object may have only one additional-properties directive", child.line);
       }
       if (index !== bullet.children.length - 1) {
-        throw new SchemaPlainSyntaxError("The additional-properties directive must be the object's final child", child.line);
+        throw new PlainTypeSyntaxError("The additional-properties directive must be the object's final child", child.line);
       }
       sawAdditionalDirective = true;
       additionalMode = child.text === V2_ADDITIONAL_ALLOWED ? "allowed" : "unspecified";
       continue;
     }
 
-    if (child.text === V2_DEFINITIONS) {
+    if (version === 2 && child.text === V2_DEFINITIONS) {
       if (!allowDefinitions) {
-        throw new SchemaPlainSyntaxError("Definitions are supported only on the root object", child.line);
+        throw new PlainTypeSyntaxError("Definitions are supported only on the root object", child.line);
       }
       if (sawDefinitions) {
-        throw new SchemaPlainSyntaxError("An object may have only one Definitions section", child.line);
+        throw new PlainTypeSyntaxError("An object may have only one Definitions section", child.line);
       }
       if (sawAdditionalDirective) {
-        throw new SchemaPlainSyntaxError("Definitions must precede the additional-properties directive", child.line);
+        throw new PlainTypeSyntaxError("Definitions must precede the additional-properties directive", child.line);
       }
       sawDefinitions = true;
       const entries: JsonObjectEntry[] = [];
       for (const definitionBullet of child.children) {
         const definition = parseV2Declaration(definitionBullet.text, definitionBullet.line);
         if (definition.optional) {
-          throw new SchemaPlainSyntaxError("A reusable definition cannot be optional", definitionBullet.line);
+          throw new PlainTypeSyntaxError("A reusable definition cannot be optional", definitionBullet.line);
         }
         if (definition.body.endsWith(V2_UNION_SUFFIX)) {
-          throw new SchemaPlainSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
+          throw new PlainTypeSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
         }
         if (entries.some(({ key }) => key === definition.name)) {
-          throw new SchemaPlainSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
+          throw new PlainTypeSyntaxError(`Duplicate definition ${jsonString(definition.name)}`, definitionBullet.line);
         }
         entries.push({
           key: definition.name,
-          value: schemaFromV2Object(definition, definitionBullet, false, context, false),
+          value: schemaFromV2Object(definition, definitionBullet, false, context, false, version),
         });
       }
       definitions = objectNode(entries);
@@ -1147,21 +1414,37 @@ function schemaFromV2Object(
     }
 
     if (sawDefinitions) {
-      throw new SchemaPlainSyntaxError("Only the additional-properties directive may follow Definitions", child.line);
+      throw new PlainTypeSyntaxError("Only the additional-properties directive may follow Definitions", child.line);
     }
 
-    const parsed = propertyFromV2Bullet(child, context);
+    const parsed = propertyFromV2Bullet(child, context, version);
     if (properties.some(({ key }) => key === parsed.name)) {
-      throw new SchemaPlainSyntaxError(`Duplicate compact property ${jsonString(parsed.name)} is ambiguous`, child.line);
+      throw new PlainTypeSyntaxError(`Duplicate compact property ${jsonString(parsed.name)} is ambiguous`, child.line);
     }
     properties.push({ key: parsed.name, value: parsed.schema });
     if (!parsed.optional) required.push({ type: "string", value: parsed.name });
+  }
+
+  if (siblingDefinitions.length > 0) {
+    const entries: JsonObjectEntry[] = [];
+    for (const definitionBullet of siblingDefinitions) {
+      const definition = parseV3ConceptDeclaration(definitionBullet.text, definitionBullet.line);
+      if (definition.body.endsWith(V2_UNION_SUFFIX)) {
+        throw new PlainTypeSyntaxError("A concise reusable definition must be an object", definitionBullet.line);
+      }
+      entries.push({
+        key: definition.name,
+        value: schemaFromV2Object(definition, definitionBullet, false, context, false, version),
+      });
+    }
+    definitions = objectNode(entries);
   }
 
   return objectNode([
     ...(named ? [{ key: "title", value: { type: "string", value: declaration.name } } as JsonObjectEntry] : []),
     { key: "type", value: { type: "string", value: "object" } },
     { key: "description", value: { type: "string", value: declaration.body } },
+    ...commentEntries(bullet, context),
     { key: "properties", value: objectNode(properties) },
     { key: "required", value: arrayNode(required) },
     ...(definitions === null
@@ -1176,10 +1459,13 @@ function schemaFromV2Object(
 function propertyFromV2Bullet(
   bullet: Bullet,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): { name: string; optional: boolean; schema: JsonNode } {
-  const declaration = parseV2Declaration(bullet.text, bullet.line);
+  const declaration = version === 3
+    ? parseV3AttributeDeclaration(bullet.text, bullet.line)
+    : parseV2Declaration(bullet.text, bullet.line);
   if (declaration.body.endsWith(V2_UNION_SUFFIX)) {
-    throw new SchemaPlainSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
+    throw new PlainTypeSyntaxError("Exactly-one unions are not supported as object properties", bullet.line);
   }
   const separator = lastUnquotedSeparator(declaration.body, " - ");
   const hasLeafShape = separator >= 0 && declaration.body.endsWith(".");
@@ -1187,29 +1473,59 @@ function propertyFromV2Bullet(
     return {
       name: declaration.name,
       optional: declaration.optional,
-      schema: schemaFromV2Object(declaration, bullet, false, context, false),
+      schema: schemaFromV2Object(declaration, bullet, false, context, false, version),
     };
   }
   requireNoChildren(bullet);
   const description = declaration.body.slice(0, separator);
-  const constraint = declaration.body.slice(separator + 3, -1);
+  const tail = declaration.body.slice(separator + 3, -1);
   if (description === "" || !isSafeV2InlineDescription(description)) {
-    throw new SchemaPlainSyntaxError("A property needs a safe inline description", bullet.line);
+    throw new PlainTypeSyntaxError("A property needs a safe inline description", bullet.line);
   }
+  const { constraint, annotations } = version === 3
+    ? splitV3Annotations(tail, bullet.line)
+    : { constraint: tail, annotations: [] };
   return {
     name: declaration.name,
     optional: declaration.optional,
     schema: objectNode([
       { key: "description", value: { type: "string", value: description } },
-      ...entriesFromV2Constraint(constraint, bullet.line, context),
+      ...commentEntries(bullet, context),
+      ...entriesFromV2Constraint(constraint, bullet.line, context, version),
+      ...annotations,
     ]),
   };
+}
+
+function commentEntries(bullet: Bullet, context: V2ReferenceContext): JsonObjectEntry[] {
+  const comment = context.comments?.get(bullet.line);
+  return comment === undefined ? [] : [{ key: "$comment", value: { type: "string", value: comment } }];
+}
+
+/** Split `constraint. Defaults to X. For example: A or B` into the constraint and annotation members. */
+function splitV3Annotations(source: string, line: number): { constraint: string; annotations: JsonObjectEntry[] } {
+  let constraint = source;
+  let examples: JsonObjectEntry | null = null;
+  const examplesAt = lastUnquotedSeparator(constraint, V3_EXAMPLES_LEAD);
+  if (examplesAt >= 0) {
+    const values = parseJsonNaturalList(constraint.slice(examplesAt + V3_EXAMPLES_LEAD.length), line);
+    examples = { key: "examples", value: arrayNode(values) };
+    constraint = constraint.slice(0, examplesAt);
+  }
+  let fallback: JsonObjectEntry | null = null;
+  const defaultAt = lastUnquotedSeparator(constraint, V3_DEFAULT_LEAD);
+  if (defaultAt >= 0) {
+    fallback = { key: "default", value: parseEmbeddedJson(constraint.slice(defaultAt + V3_DEFAULT_LEAD.length), line) };
+    constraint = constraint.slice(0, defaultAt);
+  }
+  return { constraint, annotations: [...(fallback ? [fallback] : []), ...(examples ? [examples] : [])] };
 }
 
 function entriesFromV2Constraint(
   source: string,
   line: number,
   context: V2ReferenceContext,
+  version: ConversationalVersion,
 ): JsonObjectEntry[] {
   const literal = tryParseEmbeddedJson(source);
   if (literal !== null) return [{ key: "const", value: literal }];
@@ -1246,11 +1562,24 @@ function entriesFromV2Constraint(
   const externalReference = nullable ? null : /^a reference to ("(?:[^"\\]|\\[\s\S])*")$/.exec(base);
   if (externalReference !== null) {
     const reference = parseEmbeddedJson(externalReference[1] ?? "", line);
-    if (reference.type !== "string") throw new SchemaPlainSyntaxError("Expected a reference URI string", line);
+    if (reference.type !== "string") throw new PlainTypeSyntaxError("Expected a reference URI string", line);
     return [{ key: "$ref", value: reference }];
   }
 
-  const arrayReference = nullable ? null : /^an array of ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
+  const linkedReference = nullable || version === 2 ? null : /^a reference to \[([^\]]+)\]\(([^)]+)\)$/.exec(base);
+  if (linkedReference !== null) {
+    const [, text, target] = linkedReference;
+    if (text !== target || target === undefined || !isLinkableReference(target)) {
+      throw new PlainTypeSyntaxError("A linked reference must be a relative file path whose link text equals its target", line);
+    }
+    return [{ key: "$ref", value: { type: "string", value: target } }];
+  }
+
+  const arrayReference = nullable
+    ? null
+    : version === 3
+      ? /^an array of :([A-Za-z0-9+._-]+):$/.exec(base)
+      : /^an array of ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
   if (arrayReference !== null) {
     const reference = v2NamedReference(arrayReference[1] ?? "", line, context);
     return [
@@ -1259,7 +1588,11 @@ function entriesFromV2Constraint(
     ];
   }
 
-  const namedReference = nullable ? null : /^(?:a|an) ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
+  const namedReference = nullable
+    ? null
+    : version === 3
+      ? /^(?:a|an) :([A-Za-z0-9+._-]+):$/.exec(base)
+      : /^(?:a|an) ([A-Z][A-Za-z0-9_-]*)$/.exec(base);
   if (namedReference !== null) {
     const name = namedReference[1] ?? "";
     return [{ key: "$ref", value: { type: "string", value: v2NamedReference(name, line, context) } }];
@@ -1269,7 +1602,7 @@ function entriesFromV2Constraint(
   if (digits !== null) {
     const raw = digits[1] === "one" ? "1" : digits[1] ?? "0";
     const expected = raw === "1" ? "digit" : "digits";
-    if (digits[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (digits[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [
       typeEntry("string"),
       { key: "pattern", value: { type: "string", value: `^[0-9]{${raw}}$` } },
@@ -1280,7 +1613,7 @@ function entriesFromV2Constraint(
   if (atLeast !== null) {
     const length = v2CountNode(atLeast[1] ?? "", line);
     const expected = isMathematicalOne(length.raw) ? "character" : "characters";
-    if (atLeast[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (atLeast[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [typeEntry("string"), { key: "minLength", value: length }];
   }
 
@@ -1288,7 +1621,7 @@ function entriesFromV2Constraint(
   if (exact !== null) {
     const length = v2CountNode(exact[1] ?? "", line);
     const expected = isMathematicalOne(length.raw) ? "character" : "characters";
-    if (exact[2] !== expected) throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
+    if (exact[2] !== expected) throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, line);
     return [
       typeEntry("string"),
       { key: "minLength", value: length },
@@ -1314,27 +1647,81 @@ function entriesFromV2Constraint(
     ];
   }
 
-  throw new SchemaPlainSyntaxError(`Unknown version-2 constraint ${JSON.stringify(source)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown version-${version} constraint ${JSON.stringify(source)}`, line);
 }
 
 function v2NamedReference(name: string, line: number, context: V2ReferenceContext): string {
   if (name === context.rootName) return "#";
   if (context.definitionNames.has(name)) return `#/$defs/${name}`;
-  throw new SchemaPlainSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown schema name ${jsonString(name)}`, line);
+}
+
+/** A comma/"or" list of JSON values, as rendered by `joinNaturalList`. */
+function parseJsonNaturalList(source: string, line: number): JsonNode[] {
+  const values: JsonNode[] = [];
+  let cursor = 0;
+  let finalExpected = false;
+  while (cursor < source.length) {
+    const end = endOfJsonValueToken(source, cursor, line);
+    values.push(parseEmbeddedJson(source.slice(cursor, end), line));
+    cursor = end;
+    if (finalExpected) {
+      if (cursor !== source.length) throw new PlainTypeSyntaxError("The final example must end the sentence", line);
+      finalExpected = false;
+      break;
+    }
+    if (cursor === source.length) break;
+    if (source.startsWith(", or ", cursor)) {
+      cursor += ", or ".length;
+      finalExpected = true;
+    } else if (source.startsWith(" or ", cursor)) {
+      cursor += " or ".length;
+      finalExpected = true;
+    } else if (source.startsWith(", ", cursor)) {
+      cursor += 2;
+    } else {
+      throw new PlainTypeSyntaxError("Expected a comma or 'or' between examples", line);
+    }
+  }
+  if (finalExpected || values.length === 0) throw new PlainTypeSyntaxError("Expected an example value", line);
+  return values;
+}
+
+function endOfJsonValueToken(source: string, start: number, line: number): number {
+  const first = source[start];
+  if (first === '"') return endOfJsonStringToken(source, start, line);
+  if (first === "{" || first === "[") {
+    let depth = 0;
+    for (let index = start; index < source.length; index += 1) {
+      const character = source[index];
+      if (character === '"') {
+        index = endOfJsonStringToken(source, index, line) - 1;
+      } else if (character === "{" || character === "[") {
+        depth += 1;
+      } else if (character === "}" || character === "]") {
+        depth -= 1;
+        if (depth === 0) return index + 1;
+      }
+    }
+    throw new PlainTypeSyntaxError("Unterminated JSON value", line);
+  }
+  const scalar = /^(?:-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)/.exec(source.slice(start));
+  if (scalar === null) throw new PlainTypeSyntaxError("Expected a JSON value", line);
+  return start + scalar[0].length;
 }
 
 function v2CountNode(source: string, line: number): Extract<JsonNode, { type: "number" }> {
   const node = v2NumberNode(source === "one" ? "1" : source, line);
   const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
   if (codec === undefined || !codec.accepts(node)) {
-    throw new SchemaPlainSyntaxError("A character count must be a non-negative JSON integer", line);
+    throw new PlainTypeSyntaxError("A character count must be a non-negative JSON integer", line);
   }
   return node;
 }
 
 function v2NumberNode(source: string, line: number): Extract<JsonNode, { type: "number" }> {
   const node = parseEmbeddedJson(source, line);
-  if (node.type !== "number") throw new SchemaPlainSyntaxError("Expected a JSON number", line);
+  if (node.type !== "number") throw new PlainTypeSyntaxError("Expected a JSON number", line);
   return node;
 }
 
@@ -1353,16 +1740,16 @@ function parseV2NaturalStringList(source: string, line: number): string[] {
   while (cursor < source.length) {
     const parsingFinalValue = finalExpected;
     if (source[cursor] !== '"') {
-      throw new SchemaPlainSyntaxError("An inline enum currently supports JSON strings only", line);
+      throw new PlainTypeSyntaxError("An inline enum currently supports JSON strings only", line);
     }
     const end = endOfJsonStringToken(source, cursor, line);
     const value = parseEmbeddedJson(source.slice(cursor, end), line);
-    if (value.type !== "string") throw new SchemaPlainSyntaxError("Expected an enum string", line);
+    if (value.type !== "string") throw new PlainTypeSyntaxError("Expected an enum string", line);
     values.push(value.value);
     cursor = end;
     if (parsingFinalValue) {
       if (cursor !== source.length) {
-        throw new SchemaPlainSyntaxError("The final enum value must end the constraint", line);
+        throw new PlainTypeSyntaxError("The final enum value must end the constraint", line);
       }
       finalExpected = false;
       break;
@@ -1377,12 +1764,12 @@ function parseV2NaturalStringList(source: string, line: number): string[] {
     } else if (source.startsWith(", ", cursor)) {
       cursor += 2;
     } else {
-      throw new SchemaPlainSyntaxError("Expected a comma or 'or' between enum values", line);
+      throw new PlainTypeSyntaxError("Expected a comma or 'or' between enum values", line);
     }
   }
-  if (finalExpected) throw new SchemaPlainSyntaxError("Expected the final enum value", line);
+  if (finalExpected) throw new PlainTypeSyntaxError("Expected the final enum value", line);
   if (values.length === 0 || new Set(values).size !== values.length) {
-    throw new SchemaPlainSyntaxError("An inline enum needs unique string values", line);
+    throw new PlainTypeSyntaxError("An inline enum needs unique string values", line);
   }
   return values;
 }
@@ -1396,7 +1783,7 @@ function parseV2Declaration(source: string, line: number): V2Declaration {
     cursor = end;
   } else {
     const match = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(source);
-    if (match === null) throw new SchemaPlainSyntaxError("Expected a safe name or JSON string", line);
+    if (match === null) throw new PlainTypeSyntaxError("Expected a safe name or JSON string", line);
     nameToken = match[0];
     cursor = nameToken.length;
   }
@@ -1405,22 +1792,52 @@ function parseV2Declaration(source: string, line: number): V2Declaration {
   let object = false;
   if (source.startsWith(" (", cursor)) {
     const close = source.indexOf(")", cursor + 2);
-    if (close < 0) throw new SchemaPlainSyntaxError("Unclosed declaration qualifiers", line);
+    if (close < 0) throw new PlainTypeSyntaxError("Unclosed declaration qualifiers", line);
     const qualifiers = source.slice(cursor + 2, close).split(", ");
     if (new Set(qualifiers).size !== qualifiers.length) {
-      throw new SchemaPlainSyntaxError("Duplicate declaration qualifier", line);
+      throw new PlainTypeSyntaxError("Duplicate declaration qualifier", line);
     }
     for (const qualifier of qualifiers) {
       if (qualifier === "optional") optional = true;
       else if (qualifier === "object") object = true;
-      else throw new SchemaPlainSyntaxError(`Unknown declaration qualifier ${JSON.stringify(qualifier)}`, line);
+      else throw new PlainTypeSyntaxError(`Unknown declaration qualifier ${JSON.stringify(qualifier)}`, line);
     }
     cursor = close + 1;
   }
-  if (source[cursor] !== ":") throw new SchemaPlainSyntaxError("Expected ':' after the declaration name", line);
+  if (source[cursor] !== ":") throw new PlainTypeSyntaxError("Expected ':' after the declaration name", line);
   cursor += 1;
   if (source[cursor] === " ") cursor += 1;
   return { name, optional, object, body: source.slice(cursor) };
+}
+
+/** `:Concept: description` — how v3 names a root, alternative, or definition. */
+function parseV3ConceptDeclaration(source: string, line: number): V2Declaration {
+  const match = /^:([A-Za-z0-9+._-]+):(?: ([\s\S]*))?$/.exec(source);
+  if (match === null) throw new PlainTypeSyntaxError("Expected a :ConceptName: declaration", line);
+  return { name: match[1] ?? "", optional: false, object: false, body: match[2] ?? "" };
+}
+
+/** `name (optional) - description …` — how v3 declares a property, as a ***plain attribute. */
+function parseV3AttributeDeclaration(source: string, line: number): V2Declaration {
+  let nameToken: string;
+  if (source.startsWith('"')) {
+    nameToken = source.slice(0, endOfJsonStringToken(source, 0, line));
+  } else {
+    const match = /^[A-Za-z_][A-Za-z0-9_-]*/.exec(source);
+    if (match === null) throw new PlainTypeSyntaxError("Expected a safe name or JSON string", line);
+    nameToken = match[0];
+  }
+  const name = parsePropertyName(nameToken, line);
+  let cursor = nameToken.length;
+  let optional = false;
+  if (source.startsWith(" (optional)", cursor)) {
+    optional = true;
+    cursor += " (optional)".length;
+  }
+  if (!source.startsWith(" - ", cursor)) {
+    throw new PlainTypeSyntaxError("Expected ' - ' between the attribute name and its description", line);
+  }
+  return { name, optional, object: false, body: source.slice(cursor + 3) };
 }
 
 function endOfJsonStringToken(source: string, start: number, line: number): number {
@@ -1435,7 +1852,7 @@ function endOfJsonStringToken(source: string, start: number, line: number): numb
       return index + 1;
     }
   }
-  throw new SchemaPlainSyntaxError("Unterminated JSON string token", line);
+  throw new PlainTypeSyntaxError("Unterminated JSON string token", line);
 }
 
 function lastUnquotedSeparator(source: string, separator: string): number {
@@ -1474,28 +1891,28 @@ function parseBullets(lines: readonly string[], startIndex: number): Bullet[] {
   for (let index = startIndex; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
     if (line.includes("\t")) {
-      throw new SchemaPlainSyntaxError("Tabs are not allowed for indentation", index + 1);
+      throw new PlainTypeSyntaxError("Tabs are not allowed for indentation", index + 1);
     }
     if (line.trim() === "") continue;
     const bulletMatch = /^( *)(- )([\s\S]*)$/.exec(line);
     const commentMatch = /^( *)#(?: ([\s\S]*))?$/.exec(line);
     if (bulletMatch === null && commentMatch === null) {
-      throw new SchemaPlainSyntaxError("Expected a bullet clause or '# ' description", index + 1);
+      throw new PlainTypeSyntaxError("Expected a bullet clause or '# ' description", index + 1);
     }
     const spaces = (bulletMatch?.[1] ?? commentMatch?.[1])?.length ?? 0;
     if (spaces % 2 !== 0) {
-      throw new SchemaPlainSyntaxError("Indentation must use multiples of two spaces", index + 1);
+      throw new PlainTypeSyntaxError("Indentation must use multiples of two spaces", index + 1);
     }
     const depth = spaces / 2;
     while (lists.length > depth + 1) lists.pop();
     if (depth > lists.length) {
-      throw new SchemaPlainSyntaxError("Indentation skipped a nesting level", index + 1);
+      throw new PlainTypeSyntaxError("Indentation skipped a nesting level", index + 1);
     }
     if (depth === lists.length) {
       const parentList = lists[depth - 1];
       const parent = parentList?.at(-1);
       if (parent === undefined) {
-        throw new SchemaPlainSyntaxError("An indented clause needs a parent clause", index + 1);
+        throw new PlainTypeSyntaxError("An indented clause needs a parent clause", index + 1);
       }
       lists.push(parent.children);
     }
@@ -1503,7 +1920,7 @@ function parseBullets(lines: readonly string[], startIndex: number): Bullet[] {
     const text = comment === null
       ? bulletMatch?.[3] ?? ""
       : `Its description is ${jsonString(comment)}.`;
-    if (text === "") throw new SchemaPlainSyntaxError("A bullet clause cannot be empty", index + 1);
+    if (text === "") throw new PlainTypeSyntaxError("A bullet clause cannot be empty", index + 1);
     lists[depth]?.push({ text, line: index + 1, children: [] });
   }
   return roots;
@@ -1530,7 +1947,7 @@ function schemaFromBullets(bullets: readonly Bullet[]): JsonNode {
     ({ text }) => text === ALLOW_ALL || text === DENY_ALL || text === EMPTY_SCHEMA,
   );
   if (marker !== undefined) {
-    throw new SchemaPlainSyntaxError("A boolean or empty schema marker must be the only clause", marker.line);
+    throw new PlainTypeSyntaxError("A boolean or empty schema marker must be the only clause", marker.line);
   }
   return objectNode(bullets.flatMap(entriesFromBullet));
 }
@@ -1545,7 +1962,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     const value = parseEmbeddedJson(legacyRequired, bullet.line);
     const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "required");
     if (codec === undefined || !codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError("Legacy required properties must be a unique array of strings", bullet.line);
+      throw new PlainTypeSyntaxError("Legacy required properties must be a unique array of strings", bullet.line);
     }
     return [{ key: "required", value }];
   }
@@ -1556,7 +1973,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     requireNoChildren(bullet);
     const value = parseEmbeddedJson(raw, bullet.line);
     if (!codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         `The value does not have the required shape for ${JSON.stringify(codec.keyword)}; use the exact-entry clause to preserve it opaquely`,
         bullet.line,
       );
@@ -1569,20 +1986,20 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     requireNoChildren(bullet);
     const pair = parseEmbeddedJson(exactRaw, bullet.line);
     if (pair.type !== "array" || pair.items.length !== 2 || pair.items[0]?.type !== "string") {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         "An exact entry must be a two-item JSON array containing a string name and its value",
         bullet.line,
       );
     }
     const value = pair.items[1];
-    if (value === undefined) throw new SchemaPlainSyntaxError("The exact entry has no value", bullet.line);
+    if (value === undefined) throw new PlainTypeSyntaxError("The exact entry has no value", bullet.line);
     return [{ key: pair.items[0].value, value }];
   }
 
   for (const codec of SCHEMA_CODECS_2020_12) {
     if (bullet.text !== codec.clause) continue;
     if (bullet.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${JSON.stringify(codec.keyword)} needs a nested schema`, bullet.line);
+      throw new PlainTypeSyntaxError(`${JSON.stringify(codec.keyword)} needs a nested schema`, bullet.line);
     }
     return [{ key: codec.keyword, value: schemaFromBullets(bullet.children) }];
   }
@@ -1597,7 +2014,7 @@ function entriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     return [{ key: codec.keyword, value: schemaArrayFromBullet(bullet, codec) }];
   }
 
-  throw new SchemaPlainSyntaxError(`Unknown schema clause ${JSON.stringify(bullet.text)}`, bullet.line);
+  throw new PlainTypeSyntaxError(`Unknown schema clause ${JSON.stringify(bullet.text)}`, bullet.line);
 }
 
 function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
@@ -1608,7 +2025,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     if (child.text.endsWith(":")) {
       const parsed = structuredPropertyLabel(child);
       if (child.children.length === 0) {
-        throw new SchemaPlainSyntaxError(`Property ${jsonString(parsed.name)} needs a nested schema`, child.line);
+        throw new PlainTypeSyntaxError(`Property ${jsonString(parsed.name)} needs a nested schema`, child.line);
       }
       properties.push({ key: parsed.name, value: schemaFromBullets(child.children) });
       if (parsed.required) required.push({ type: "string", value: parsed.name });
@@ -1617,7 +2034,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
 
     const conversational = propertyFromConversationalBullet(child);
     if (conversational === null) {
-      throw new SchemaPlainSyntaxError("Expected '<property name>:' or a conversational property sentence", child.line);
+      throw new PlainTypeSyntaxError("Expected '<property name>:' or a conversational property sentence", child.line);
     }
     properties.push({ key: conversational.name, value: conversational.schema });
     if (conversational.required) required.push({ type: "string", value: conversational.name });
@@ -1631,7 +2048,7 @@ function propertyEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
 
 function structuredPropertyLabel(bullet: Bullet): { name: string; required: boolean } {
   if (!bullet.text.endsWith(":")) {
-    throw new SchemaPlainSyntaxError("Expected '<property name>:' or a conversational property sentence", bullet.line);
+    throw new PlainTypeSyntaxError("Expected '<property name>:' or a conversational property sentence", bullet.line);
   }
   let token = bullet.text.slice(0, -1);
   let required = false;
@@ -1672,19 +2089,19 @@ function propertyFromConversationalBullet(
       bullet.line,
     );
   } else {
-    throw new SchemaPlainSyntaxError("Unknown conversational property constraint", bullet.line);
+    throw new PlainTypeSyntaxError("Unknown conversational property constraint", bullet.line);
   }
 
   if (bullet.children.length > 0) {
     if (schema.type !== "object") {
-      throw new SchemaPlainSyntaxError("Only an object-form conversational property may have descriptions", bullet.line);
+      throw new PlainTypeSyntaxError("Only an object-form conversational property may have descriptions", bullet.line);
     }
     const annotations = schemaFromBullets(bullet.children);
     if (
       annotations.type !== "object" ||
       annotations.entries.some(({ key, value }) => key !== "description" || value.type !== "string")
     ) {
-      throw new SchemaPlainSyntaxError("Conversational property children must be '# ' descriptions", bullet.line);
+      throw new PlainTypeSyntaxError("Conversational property children must be '# ' descriptions", bullet.line);
     }
     schema = objectNode([...annotations.entries, ...schema.entries]);
   }
@@ -1701,7 +2118,7 @@ function schemaFromConversationalTypes(source: string, line: number): JsonObject
     types.push(parsed.type);
     if (parsed.minLength !== null) {
       if (minLength !== null) {
-        throw new SchemaPlainSyntaxError("Only one string type may carry a length constraint", line);
+        throw new PlainTypeSyntaxError("Only one string type may carry a length constraint", line);
       }
       minLength = parsed.minLength;
     }
@@ -1712,7 +2129,7 @@ function schemaFromConversationalTypes(source: string, line: number): JsonObject
     : arrayNode(types.map((value) => ({ type: "string", value })));
   const typeCodec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "type");
   if (typeCodec === undefined || !typeCodec.accepts(typeValue)) {
-    throw new SchemaPlainSyntaxError("Conversational types must be unique JSON Schema types", line);
+    throw new PlainTypeSyntaxError("Conversational types must be unique JSON Schema types", line);
   }
   return objectNode([
     { key: "type", value: typeValue },
@@ -1748,20 +2165,20 @@ function parseConversationalType(part: string, line: number): { type: string; mi
     const value = parseEmbeddedJson(stringMatch[1] ?? "", line);
     const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
     if (codec === undefined || !codec.accepts(value)) {
-      throw new SchemaPlainSyntaxError("A string length must be a non-negative JSON integer", line);
+      throw new PlainTypeSyntaxError("A string length must be a non-negative JSON integer", line);
     }
     const expectedUnit = value.type === "number" && isMathematicalOne(value.raw) ? "character" : "characters";
     if (stringMatch[2] !== expectedUnit) {
-      throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, line);
+      throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, line);
     }
     return { type: "string", minLength: value };
   }
-  throw new SchemaPlainSyntaxError(`Unknown conversational type ${JSON.stringify(part)}`, line);
+  throw new PlainTypeSyntaxError(`Unknown conversational type ${JSON.stringify(part)}`, line);
 }
 
 function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
   if (bullet.children.length === 0) {
-    throw new SchemaPlainSyntaxError("allowed types needs at least one nested type", bullet.line);
+    throw new PlainTypeSyntaxError("allowed types needs at least one nested type", bullet.line);
   }
   const types: string[] = [];
   let minLength: JsonNode | null = null;
@@ -1772,18 +2189,18 @@ function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     if (stringMatch !== null) {
       type = "string";
       if (minLength !== null) {
-        throw new SchemaPlainSyntaxError("Only one string type may carry a length constraint", child.line);
+        throw new PlainTypeSyntaxError("Only one string type may carry a length constraint", child.line);
       }
       minLength = parseEmbeddedJson(stringMatch[1] ?? "", child.line);
       const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "minLength");
       if (codec === undefined || !codec.accepts(minLength)) {
-        throw new SchemaPlainSyntaxError("A string length must be a non-negative JSON integer", child.line);
+        throw new PlainTypeSyntaxError("A string length must be a non-negative JSON integer", child.line);
       }
       const expectedUnit = minLength.type === "number" && isMathematicalOne(minLength.raw)
         ? "character"
         : "characters";
       if (stringMatch[2] !== expectedUnit) {
-        throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, child.line);
+        throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expectedUnit)} for this string length`, child.line);
       }
     }
     types.push(type);
@@ -1794,7 +2211,7 @@ function allowedTypeEntriesFromBullet(bullet: Bullet): JsonObjectEntry[] {
     : arrayNode(types.map((value) => ({ type: "string", value })));
   const codec = VALUE_CODECS_2020_12.find(({ keyword }) => keyword === "type");
   if (codec === undefined || !codec.accepts(typeValue)) {
-    throw new SchemaPlainSyntaxError("allowed types must list unique JSON Schema type names", bullet.line);
+    throw new PlainTypeSyntaxError("allowed types must list unique JSON Schema type names", bullet.line);
   }
   return [
     { key: "type", value: typeValue },
@@ -1806,7 +2223,7 @@ function parsePropertyName(source: string, line: number): string {
   if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(source)) return source;
   const parsed = parseEmbeddedJson(source, line);
   if (parsed.type !== "string") {
-    throw new SchemaPlainSyntaxError("A property name must be a bare safe name or JSON string", line);
+    throw new PlainTypeSyntaxError("A property name must be a bare safe name or JSON string", line);
   }
   return parsed.value;
 }
@@ -1815,7 +2232,7 @@ function schemaMapFromBullet(bullet: Bullet, codec: SchemaMapCodec): JsonObject 
   const entries = bullet.children.map((child): JsonObjectEntry => {
     const prefix = `${codec.itemLabel} `;
     if (!child.text.startsWith(prefix) || !child.text.endsWith(":")) {
-      throw new SchemaPlainSyntaxError(
+      throw new PlainTypeSyntaxError(
         `Expected '${codec.itemLabel} <JSON string>:'`,
         child.line,
       );
@@ -1823,10 +2240,10 @@ function schemaMapFromBullet(bullet: Bullet, codec: SchemaMapCodec): JsonObject 
     const rawName = child.text.slice(prefix.length, -1);
     const name = parseEmbeddedJson(rawName, child.line);
     if (name.type !== "string") {
-      throw new SchemaPlainSyntaxError(`${codec.itemLabel} names must be JSON strings`, child.line);
+      throw new PlainTypeSyntaxError(`${codec.itemLabel} names must be JSON strings`, child.line);
     }
     if (child.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${codec.itemLabel} ${jsonString(name.value)} needs a nested schema`, child.line);
+      throw new PlainTypeSyntaxError(`${codec.itemLabel} ${jsonString(name.value)} needs a nested schema`, child.line);
     }
     return { key: name.value, value: schemaFromBullets(child.children) };
   });
@@ -1837,10 +2254,10 @@ function schemaArrayFromBullet(bullet: Bullet, codec: SchemaArrayCodec): JsonNod
   const items = bullet.children.map((child, index): JsonNode => {
     const expected = `${codec.itemLabel} ${index + 1}:`;
     if (child.text !== expected) {
-      throw new SchemaPlainSyntaxError(`Expected ${JSON.stringify(expected)}`, child.line);
+      throw new PlainTypeSyntaxError(`Expected ${JSON.stringify(expected)}`, child.line);
     }
     if (child.children.length === 0) {
-      throw new SchemaPlainSyntaxError(`${expected.slice(0, -1)} needs a nested schema`, child.line);
+      throw new PlainTypeSyntaxError(`${expected.slice(0, -1)} needs a nested schema`, child.line);
     }
     return schemaFromBullets(child.children);
   });
@@ -1858,13 +2275,13 @@ function parseEmbeddedJson(source: string, line: number): JsonNode {
     return parseJson(source);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new SchemaPlainSyntaxError(`Invalid embedded JSON: ${message}`, line);
+    throw new PlainTypeSyntaxError(`Invalid embedded JSON: ${message}`, line);
   }
 }
 
 function requireNoChildren(bullet: Bullet): void {
   if (bullet.children.length !== 0) {
-    throw new SchemaPlainSyntaxError("This clause cannot contain nested clauses", bullet.children[0]?.line ?? bullet.line);
+    throw new PlainTypeSyntaxError("This clause cannot contain nested clauses", bullet.children[0]?.line ?? bullet.line);
   }
 }
 

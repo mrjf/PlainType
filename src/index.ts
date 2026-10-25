@@ -1,13 +1,13 @@
 export {
-  SchemaPlainSyntaxError,
-  formatSchemaPlain,
+  PlainTypeSyntaxError,
+  formatPlainType,
   fromJsonSchema,
-  parseSchemaPlain,
+  parsePlainType,
   toJsonSchema,
   type FromJsonOptions,
   type RenderStyle,
   type ToJsonOptions,
-} from "./schemaplain.js";
+} from "./plaintype.js";
 
 export {
   JsonSyntaxError,

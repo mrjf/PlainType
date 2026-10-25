@@ -1,0 +1,3 @@
+[submodule "demo/vendor/filo"]
+	path = demo/vendor/filo
+	url = https://github.com/mrjf/filo.git
