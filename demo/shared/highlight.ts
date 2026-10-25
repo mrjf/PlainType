@@ -43,7 +43,6 @@ const KEYWORDS = new Set([
   "Sensitive", "number", "numbers", "integers", "boolean", "booleans", "matching", "URL", "date-time", "dates",
 ]);
 const CONCEPT = /^:[A-Za-z0-9+._-]+:/;
-const INLINE = /"(?:[^"\\]|\\.)*"|\[[^\]]*\]\([^)]*\)|:[A-Za-z0-9+._-]+:|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[A-Za-z][A-Za-z0-9_-]*/g;
 const NAME = /^(?:"(?:[^"\\]|\\.)*"|[A-Za-z_][A-Za-z0-9_-]*)/;
 const QUALIFIER = /^ ?\((?:optional|required|object|optional, object)\)/;
 const EXACT_PROPERTY = /^ Exact JSON Schema: /;
@@ -143,17 +142,121 @@ function describe(line: string, cursor: number, push: (start: number, end: numbe
 
 function inline(line: string, from: number, to: number, push: (start: number, end: number, cls: TokenClass) => void): void {
   const segment = line.slice(from, to);
-  for (const match of segment.matchAll(INLINE)) {
-    const word = match[0];
-    const start = from + match.index;
-    const end = start + word.length;
-    if (word.startsWith('"')) push(start, end, "string");
-    else if (word.startsWith("[")) push(start, end, "string");
-    else if (word.startsWith(":")) push(start, end, "concept");
-    else if (/^-?\d/.test(word)) push(start, end, "number");
-    else if (KEYWORDS.has(word)) push(start, end, "keyword");
-    else if (/^[A-Z]/.test(word)) push(start, end, "type");
+  for (const [start, end] of inlineRuns(segment)) {
+    const word = segment.slice(start, end);
+    if (word.startsWith('"')) push(from + start, from + end, "string");
+    else if (word.startsWith("[")) push(from + start, from + end, "string");
+    else if (word.startsWith(":")) push(from + start, from + end, "concept");
+    else if (/^-?\d/.test(word)) push(from + start, from + end, "number");
+    else if (KEYWORDS.has(word)) push(from + start, from + end, "keyword");
+    else if (/^[A-Z]/.test(word)) push(from + start, from + end, "type");
   }
+}
+
+const isDigit = (code: number): boolean => code >= 48 && code <= 57;
+const isLetter = (code: number): boolean => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+/** `[A-Za-z0-9_-]`: what continues a word. */
+const isWordPart = (code: number): boolean => isLetter(code) || isDigit(code) || code === 95 || code === 45;
+/** `[A-Za-z0-9+._-]`: what a concept name is made of. */
+const isConceptPart = (code: number): boolean => isLetter(code) || isDigit(code) || code === 43 || code === 46 || code === 95 || code === 45;
+/** What `.` does not match in a regular expression: a line terminator. */
+const isTerminator = (code: number): boolean => code === 10 || code === 13 || code === 0x2028 || code === 0x2029;
+
+/**
+ * `segment.indexOf(char, from)` for `from` that only grows, remembered: what was found stays the nearest `char` until
+ * the search passes it, and a search that found none has found none for every later `from`.
+ */
+function nearest(segment: string, char: string): (from: number) => number {
+  let began = -1;
+  let found = -1;
+  return (from) => {
+    if (began < 0 || from < began || (found >= 0 && found < from)) {
+      began = from;
+      found = segment.indexOf(char, from);
+    }
+    return found;
+  };
+}
+
+/**
+ * The runs of `segment` the highlighter classifies, as `[start, end)`, left to right: a quoted string with `\` escapes
+ * (`"(?:[^"\\]|\\.)*"`), a link `[text](target)`, a concept `:Name:`, a number, a word. Text that opens one and never
+ * closes it (a lone `"`, `[`, `:`) opens nothing. A hand scanner, linear in the segment, since a regular expression with
+ * these alternatives searches to the end of the line from every opening that fails, which is quadratic on a line of
+ * `[` or `"\`: here what a failed opening found is remembered for the openings after it.
+ */
+function inlineRuns(segment: string): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  const n = segment.length;
+  const at = (i: number): number => segment.charCodeAt(i);
+  const close = nearest(segment, "]");
+  const paren = nearest(segment, ")");
+  // A quote that opens no string fails where its scan stopped, `quoteFails`; every quote before that is the second half of
+  // an escape in the same scan, and reads the same text from there on, so fails at the same place and is not tried.
+  let quoteFails = 0;
+
+  let i = 0;
+  while (i < n) {
+    const code = at(i);
+    let end = -1;
+    if (code === 34) {
+      if (i >= quoteFails) {
+        let j = i + 1;
+        let stopped = n;
+        while (j < n) {
+          const c = at(j);
+          if (c === 34) {
+            end = j + 1;
+            break;
+          }
+          if (c !== 92) j += 1;
+          else if (j + 1 < n && !isTerminator(at(j + 1))) j += 2;
+          else {
+            stopped = j;
+            break;
+          }
+        }
+        if (end < 0) quoteFails = stopped;
+      }
+    } else if (code === 91) {
+      const k = close(i + 1);
+      if (k >= 0 && at(k + 1) === 40) {
+        const m = paren(k + 2);
+        if (m >= 0) end = m + 1;
+      }
+    } else if (code === 58) {
+      let j = i + 1;
+      while (j < n && isConceptPart(at(j))) j += 1;
+      if (j > i + 1 && at(j) === 58) end = j + 1;
+    } else if (code === 45 || isDigit(code)) {
+      let j = code === 45 ? i + 1 : i;
+      if (isDigit(at(j))) {
+        while (isDigit(at(j))) j += 1;
+        if (at(j) === 46 && isDigit(at(j + 1))) {
+          j += 2;
+          while (isDigit(at(j))) j += 1;
+        }
+        if (at(j) === 101 || at(j) === 69) {
+          let k = j + 1;
+          if (at(k) === 43 || at(k) === 45) k += 1;
+          if (isDigit(at(k))) {
+            while (isDigit(at(k))) k += 1;
+            j = k;
+          }
+        }
+        end = j;
+      }
+    } else if (isLetter(code)) {
+      let j = i + 1;
+      while (j < n && isWordPart(at(j))) j += 1;
+      end = j;
+    }
+    if (end > i) {
+      runs.push([i, end]);
+      i = end;
+    } else i += 1;
+  }
+  return runs;
 }
 
 function lastUnquotedDash(line: string, from: number): number {
