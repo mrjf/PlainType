@@ -156,7 +156,7 @@ function renderRecord(): void {
   const parsed = view.parsed;
   if (!parsed.ok) {
     ui.formatted.innerHTML = `<p class="error-line">${escapeHtml(parsed.error)}</p>`;
-    ui.json.textContent = "—";
+    ui.json.textContent = "-";
     ui.validBadge.textContent = parsed.line === null ? "✗ does not parse" : `✗ line ${parsed.line}`;
     ui.validBadge.className = "badge err";
     ui.jsonNotes.innerHTML = "";

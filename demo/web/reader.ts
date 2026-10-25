@@ -47,7 +47,7 @@ export function renderReader(text: string, spans: readonly SlotSpan[]): string {
       const name = concept[1] ?? "";
       const nameStart = bodyStart + 1;
       const descriptionStart = bodyStart + name.length + 3;
-      const description = descriptionStart <= line.length ? ` ${describe(line, descriptionStart, piece)}` : "";
+      const description = descriptionStart <= line.length ? `<span class="r-sep"> - </span>${describe(line, descriptionStart, piece)}` : "";
       rows.push(row("definition", depth, `<strong class="r-name">${piece(nameStart, nameStart + name.length)}</strong>${description}`));
       continue;
     }
@@ -62,7 +62,7 @@ export function renderReader(text: string, spans: readonly SlotSpan[]): string {
       rows.push(row(
         "attribute",
         depth,
-        `<span class="r-bullet">•</span><span class="r-attr-name">${piece(bodyStart, nameEnd)}</span>${qualifierHtml}<span class="r-sep"> — </span>${describe(line, rest, piece)}`,
+        `<span class="r-bullet">•</span><span class="r-attr-name">${piece(bodyStart, nameEnd)}</span>${qualifierHtml}<span class="r-sep"> - </span>${describe(line, rest, piece)}`,
       ));
       continue;
     }
@@ -72,11 +72,11 @@ export function renderReader(text: string, spans: readonly SlotSpan[]): string {
   return rows.join("");
 }
 
-/** Description, an em dash, then the constraint with concept colons removed. */
+/** Description, a colon, then the constraint with concept colons removed. */
 function describe(line: string, start: number, piece: (start: number, end: number) => string): string {
   const split = lastUnquotedDash(line, start);
   if (split === -1) return piece(start, line.length);
-  return `${piece(start, split)}<span class="r-sep"> — </span><span class="r-constraint">${conceptless(line, split + 3, line.length, piece)}</span>`;
+  return `${piece(start, split)}<span class="r-sep">: </span><span class="r-constraint">${conceptless(line, split + 3, line.length, piece)}</span>`;
 }
 
 function conceptless(line: string, start: number, end: number, piece: (start: number, end: number) => string): string {

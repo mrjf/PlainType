@@ -155,7 +155,7 @@ function renderOutputs(): void {
       tokens: highlight(view.raw.text),
       slots: view.raw.spans,
     })}</pre>`;
-    ui.json.textContent = "—";
+    ui.json.textContent = "-";
     ui.compileBadge.textContent = compiled.line === null ? "✗ error" : `✗ line ${compiled.line}`;
     ui.compileBadge.className = "badge err";
   }

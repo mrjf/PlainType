@@ -19,7 +19,7 @@ test("definitions are bold, comments italic rows, attributes bulleted", () => {
   expect(html).toContain('<strong class="r-name"><mark class="slot slot-value" data-slot="typeName"');
   expect(html).toMatch(/<div class="r-row r-comment" style="--depth:0"><mark [^>]*data-slot="draftNote"[^>]*>This is a rough draft\.<\/mark><\/div>/);
   expect(html).toContain('<span class="r-bullet">•</span><span class="r-attr-name">priority</span>');
-  expect(text).toContain("priority — The priority level — an integer between 1 and 5. For example: 2.");
+  expect(text).toContain("priority - The priority level: an integer between 1 and 5. For example: 2.");
 });
 
 test("every slot keeps a mark so hover still finds it", () => {
