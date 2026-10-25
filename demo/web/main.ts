@@ -316,7 +316,7 @@ async function heal(): Promise<void> {
   phase = { kind: "healing" };
   renderAll();
   try {
-    const response = await fetch("/api/heal", {
+    const response = await fetch("api/heal", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ raw, error: compiled.error }),
@@ -380,7 +380,7 @@ async function translate(): Promise<void> {
   phase = { kind: "thinking" };
   renderAll();
   try {
-    const response = await fetch("/api/translate", {
+    const response = await fetch("api/translate", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ natlang, previous: state }),
@@ -499,7 +499,7 @@ ui.reset.addEventListener("click", () => {
 
 async function checkHealth(): Promise<void> {
   try {
-    const response = await fetch("/api/health");
+    const response = await fetch("api/health");
     const health = HealthSchema.parse(await response.json());
     aiAvailable = health.ai;
     model = health.model;

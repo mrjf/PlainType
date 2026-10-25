@@ -342,7 +342,7 @@ async function heal(): Promise<void> {
   phase = { kind: "healing" };
   renderAll();
   try {
-    const response = await fetch("/api/instance/heal", {
+    const response = await fetch("api/instance/heal", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ raw, error: parsed.error }),
@@ -394,7 +394,7 @@ async function translate(): Promise<void> {
   phase = { kind: "thinking" };
   renderAll();
   try {
-    const response = await fetch("/api/instance/translate", {
+    const response = await fetch("api/instance/translate", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ natlang, previous: state, schema: { plaintype: schema.plaintype, json: schema.json, title: schema.context.title } }),
@@ -527,7 +527,7 @@ ui.reset.addEventListener("click", () => {
 
 async function checkHealth(): Promise<void> {
   try {
-    const health = HealthSchema.parse(await (await fetch("/api/health")).json());
+    const health = HealthSchema.parse(await (await fetch("api/health")).json());
     aiAvailable = health.ai;
     model = health.model;
   } catch {

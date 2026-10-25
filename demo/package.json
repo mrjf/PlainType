@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "start": "bun src/index.ts",
+    "build:pages": "rm -rf dist && bun build web/index.html web/instance.html --outdir dist --public-path ./ && touch dist/.nojekyll",
     "typecheck": "tsc --noEmit",
     "test": "bun test ./tests"
   },

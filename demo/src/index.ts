@@ -35,7 +35,7 @@ const app = createApp({ translate, heal, instanceTranslate, instanceHeal, model:
 
 const server = Bun.serve({
   port: env.PORT,
-  routes: { "/": homepage, "/instance": instancePage },
+  routes: { "/": homepage, "/instance": instancePage, "/instance.html": instancePage },
   fetch: app.fetch,
   development: env.NODE_ENV === "development" ? { hmr: true, console: true } : false,
 });
