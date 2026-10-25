@@ -63,7 +63,7 @@ export const SEED: DemoState = {
     "its border is always {{borderColor}}, and it may have a corner radius between {{radiusMin}} and {{radiusMax}} pixels. " +
     "It has a priority level between {{priorityMin}} and {{priorityMax}} e.g. {{priorityExample}}",
   ptTemplate: [
-    "***plaintype 3***",
+    "***plaintype***",
     "",
     "***definitions***",
     "",

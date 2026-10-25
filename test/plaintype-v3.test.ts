@@ -8,7 +8,7 @@ import {
   toJsonSchema,
 } from "../src/index.js";
 
-const HEAD = "***plaintype 3***\n\n***definitions***\n\n";
+const HEAD = "***plaintype***\n\n***definitions***\n\n";
 
 function assertV3RoundTrip(json: string): string {
   const plain = fromJsonSchema(json, { style: "plain" });
@@ -159,15 +159,15 @@ ${HEAD}- :Flag: A flag.
   });
   assert.equal(formatPlainType(source), source);
   assert.doesNotMatch(formatPlainType(source, { style: "conversational" }), /description: "Display settings"/);
-  assert.throws(() => toJsonSchema("---\na: 1\n\n***plaintype 3***"), /Unclosed YAML frontmatter at line 1/);
+  assert.throws(() => toJsonSchema("---\na: 1\n\n***plaintype***"), /Unclosed YAML frontmatter at line 1/);
   assert.throws(
     () => toJsonSchema("---\na: 1\n---\n***plaintype 2***\n\n- Every instance is accepted."),
-    /YAML frontmatter requires \*\*\*plaintype 3\*\*\* at line 1/,
+    /YAML frontmatter requires \*\*\*plaintype\*\*\* at line 1/,
   );
 });
 
 test("> lines describe the next declaration and compile to $comment", () => {
-  const source = `***plaintype 3***
+  const source = `***plaintype***
 > A module note: not compiled.
 
 ***definitions***
@@ -255,8 +255,8 @@ test("comments the > form cannot carry exactly, or misplaced comments, are handl
 });
 
 test("the ***definitions*** section is required, unique, and the only section", () => {
-  assert.throws(() => toJsonSchema("***plaintype 3***\n\n- :A: A."), /Expected \*\*\*definitions\*\*\* before the first definition at line 3/);
-  assert.throws(() => toJsonSchema("***plaintype 3***\n"), /Expected a \*\*\*definitions\*\*\* section/);
+  assert.throws(() => toJsonSchema("***plaintype***\n\n- :A: A."), /Expected \*\*\*definitions\*\*\* before the first definition at line 3/);
+  assert.throws(() => toJsonSchema("***plaintype***\n"), /Expected a \*\*\*definitions\*\*\* section/);
   assert.throws(
     () => toJsonSchema(`${HEAD}- :A: A.\n\n***functional specs***\n`),
     /contains only \*\*\*definitions\*\*\*; found \*\*\*functional specs\*\*\* at line 7/,

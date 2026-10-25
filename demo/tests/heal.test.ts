@@ -5,8 +5,8 @@ import { createHealer } from "../src/heal.js";
 import type { HealOutput } from "../src/schemas.js";
 import type { ModelCall, ModelReply } from "../src/translate.js";
 
-const BROKEN = "***plaintype 3***\n\n***definitions***\n\n- :Button: A control.\n  - label: The label - a string of 1 to 24 characters.";
-const FIXED = "***plaintype 3***\n***definitions***\n- :Button: A control.\n  - label - The label - a string between 1 and 24 characters.";
+const BROKEN = "***plaintype***\n\n***definitions***\n\n- :Button: A control.\n  - label: The label - a string of 1 to 24 characters.";
+const FIXED = "***plaintype***\n***definitions***\n- :Button: A control.\n  - label - The label - a string between 1 and 24 characters.";
 
 function reply(plaintype: string | null, stopReason = "end_turn"): ModelReply<HealOutput> {
   return { output: plaintype === null ? null : { plaintype }, stopReason, content: [{ type: "text", text: plaintype ?? "" }], model: "fake", usage: { input: 1, output: 1, cacheRead: 0 } };
@@ -30,7 +30,7 @@ test("sends the compiler error and returns canonical PlainType", async () => {
   const result = await createHealer(call)({ raw: BROKEN });
   expect(result.compileError).toBeNull();
   expect(result.raw).toBe(
-    "***plaintype 3***\n\n***definitions***\n\n- :Button: A control.\n  - label - The label - a string between 1 and 24 characters.\n",
+    "***plaintype***\n\n***definitions***\n\n- :Button: A control.\n  - label - The label - a string between 1 and 24 characters.\n",
   );
   expect(JSON.stringify(seen[0])).toContain("<compiler_error>");
   expect(JSON.stringify(seen[0])).toContain("between the attribute name and its description");

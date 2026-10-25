@@ -67,11 +67,11 @@ test("classifies version-3 concepts, attributes, annotations, links and comments
 });
 
 test("frontmatter lines are metadata", () => {
-  const text = '---\ndescription: "x"\n---\n***plaintype 3***';
+  const text = '---\ndescription: "x"\n---\n***plaintype***';
   expect(highlight(text).map((token) => [text.slice(token.start, token.end), token.cls])).toEqual([
     ["---", "meta"],
     ['description: "x"', "meta"],
     ["---", "meta"],
-    ["***plaintype 3***", "header"],
+    ["***plaintype***", "header"],
   ]);
 });

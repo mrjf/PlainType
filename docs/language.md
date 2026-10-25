@@ -8,7 +8,7 @@ comment or an advisory version number.
 | --- | --- | --- |
 | `***plaintype 1***` | `structured` | Complete keyword-by-keyword clauses |
 | `***plaintype 2***` | `conversational` | Compact object, property, and union declarations |
-| `***plaintype 3***` | `plain` | The version-2 model written in [***plain](https://plainlang.org/docs/language-guide/basic-syntax) syntax |
+| `***plaintype***` | `plain` | The version-2 model written in [***plain](https://plainlang.org/docs/language-guide/basic-syntax) syntax |
 
 ## Version 1: structured grammar
 
@@ -443,7 +443,7 @@ specification language, so a PlainType file reads like a ***plain
 description: "Per-user display settings"
 ---
 
-***plaintype 3***
+***plaintype***
 
 ***definitions***
 
@@ -474,7 +474,7 @@ The header comes first, after any frontmatter, followed by the
 is a named object, the following bullets are its reusable `$defs`, in order:
 
 ```plain
-***plaintype 3***
+***plaintype***
 
 ***definitions***
 

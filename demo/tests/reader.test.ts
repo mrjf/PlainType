@@ -27,6 +27,6 @@ test("every slot keeps a mark so hover still finds it", () => {
 });
 
 test("concept references lose their colons and are bold", () => {
-  const source = "***plaintype 3***\n\n***definitions***\n\n- :Pet: A pet.\n  - owner - The owner - an :Owner:.\n";
+  const source = "***plaintype***\n\n***definitions***\n\n- :Pet: A pet.\n  - owner - The owner - an :Owner:.\n";
   expect(renderReader(source, [])).toContain('an <strong class="r-ref">Owner</strong>.');
 });

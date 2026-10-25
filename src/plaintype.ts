@@ -24,7 +24,7 @@ import {
 
 const HEADER_V1 = "***plaintype 1***";
 const HEADER_V2 = "***plaintype 2***";
-const HEADER_V3 = "***plaintype 3***";
+const HEADER_V3 = "***plaintype***";
 const V3_DEFINITIONS_SECTION = "***definitions***";
 const V3_DEFAULT_LEAD = ". Defaults to ";
 const V3_EXAMPLES_LEAD = ". For example: ";

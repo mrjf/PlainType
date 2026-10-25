@@ -22,7 +22,7 @@ PlainType is controlled English that compiles deterministically to JSON Schema. 
 
 Output two things:
 
-1. plaintypeTemplate: a complete PlainType version-3 document: the line "***plaintype 3***", a blank line, the line "***definitions***", a blank line, then the root concept and any reusable definitions after it. Wherever the document contains a value that the user chose in their description, write a slot placeholder {{slotName}} instead of the value.
+1. plaintypeTemplate: a complete PlainType version-3 document: the line "***plaintype***", a blank line, the line "***definitions***", a blank line, then the root concept and any reusable definitions after it. Wherever the document contains a value that the user chose in their description, write a slot placeholder {{slotName}} instead of the value.
 2. slots: one entry per placeholder, {"name": slotName, "value": the exact text}, listed in the order the values appear in the natural-language description.
 
 What becomes a slot:
@@ -41,7 +41,7 @@ Use only constraint phrases from the grammar. When the description asks for some
 
 const HEAL_RULES = `You repair PlainType documents that a person edited by hand and that no longer compile.
 
-PlainType is controlled English that compiles deterministically to JSON Schema. Only the documented phrases are valid. You receive the document and the compiler's error. Return plaintype: the complete corrected document, written as PlainType version 3 (the line "***plaintype 3***", a blank line, "***definitions***", a blank line, then the definitions).
+PlainType is controlled English that compiles deterministically to JSON Schema. Only the documented phrases are valid. You receive the document and the compiler's error. Return plaintype: the complete corrected document, written as PlainType version 3 (the line "***plaintype***", a blank line, "***definitions***", a blank line, then the definitions).
 
 - Make the smallest change that makes the document valid. Keep every concept name, property name, description, comment, value, and number exactly as the person wrote them, and keep their intended meaning.
 - Fix only what the grammar does not allow: wrong or misspelled constraint phrases, missing punctuation or separators, indentation, a missing header or section, version-1 or version-2 spellings.
@@ -82,7 +82,7 @@ export async function buildSystemPrompt(): Promise<string> {
     "<example name=\"template with slots\">",
     "Description: This is a rough draft. A Button is a clickable control. Its label is between 1 and 24 characters long, like \"Buy now\", and its border is always red.",
     "plaintypeTemplate:",
-    "***plaintype 3***",
+    "***plaintype***",
     "",
     "***definitions***",
     "",

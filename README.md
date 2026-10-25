@@ -26,7 +26,7 @@ future dialects remain lossless; their semantics are not guessed.
 description: "Per-user display settings"
 ---
 
-***plaintype 3***
+***plaintype***
 
 ***definitions***
 
@@ -172,7 +172,7 @@ conversion commands also accept standard input and write to standard output
 when paths are omitted.
 
 `structured` emits `***plaintype 1***` and is the default for `from-json`.
-`conversational` emits `***plaintype 2***`, and `plain` emits `***plaintype 3***`.
+`conversational` emits `***plaintype 2***`, and `plain` emits `***plaintype***`.
 With no `--style`, `format`
 preserves the input document's version; an explicit style converts to that
 style and header.

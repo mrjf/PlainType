@@ -35,7 +35,7 @@ test("links values to the description and sends the schema as PlainType", async 
   const result = await createInstanceTranslator(call)({ natlang: NATLANG, previous: INSTANCE_SEED, schema });
   expect(result.attempts).toBe(1);
   expect(result.state.natTemplate).toBe('The sign-up button reads "{{label}}", border {{borderColor}}, priority {{priority}}.');
-  expect(JSON.stringify(seen[0])).toContain("***plaintype 3***");
+  expect(JSON.stringify(seen[0])).toContain("***plaintype***");
 });
 
 test("retries with validation problems, but accepts values the user asked for on the second try", async () => {
