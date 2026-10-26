@@ -303,3 +303,8 @@ only each other, nothing from Node, and type-check under
 Draft 2020-12 remains the latest published JSON Schema dialect; future and
 custom vocabularies are transported losslessly until a semantic codec is
 explicitly registered rather than inferred.
+
+Complex version-3 roots and union alternatives use `Schema clauses:` with the
+structured controlled-English clauses nested beneath it when compact concepts
+cannot express them. This covers bounded nested arrays and patterned maps
+without a whole-schema JSON literal; see [the grammar](docs/language.md#readable-schema-clauses-version-3).

@@ -748,3 +748,33 @@ format(format(PlainType, "plain"), "plain") = format(PlainType, "plain")
 ```
 
 `format` converts between versions 2 and 3 without changing the JSON Schema.
+
+### Readable schema clauses (version 3)
+
+When a root or union alternative cannot use the compact declaration model,
+version 3 renders `Schema clauses:` with the version-1 controlled-English
+clauses nested beneath it. This keeps nested arrays, patterned property maps,
+bounds and schemas without descriptions readable without inventing prose or
+losing member order. All version-1 clauses apply recursively. For example:
+
+```text
+***plaintype***
+
+***definitions***
+
+- Schema clauses:
+  - Its allowed type or types are "array".
+  - An array instance may contain at most this many items: 128.
+  - Its item schema is:
+    - Its allowed type or types are "number".
+    - A numeric instance must be at least 0.
+```
+
+`Schema clauses:` must have children. At module level it is the only definition;
+reusable definitions belong inside its schema-map clauses. Declaration comments
+are refused here; use `Its implementation comment is "…".` instead. Unknown
+keywords and unsupported dialects retain their exact member clauses. A string
+`label` annotation has the clause `Its sensitivity label is "sensitive".`; this
+preserves an annotation and adds no JSON Schema validation semantics.
+The exact whole-schema syntax remains parseable, but the canonical version-3
+renderer uses readable clauses. Version 2's rendering is unchanged.

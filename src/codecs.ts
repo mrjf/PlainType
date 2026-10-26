@@ -75,6 +75,7 @@ export const VALUE_CODECS_2020_12: readonly ValueCodec[] = [
   valueCodec("$dynamicAnchor", "Its dynamic anchor is", anchorString),
   valueCodec("$ref", "Its reference is", stringValue),
   valueCodec("$dynamicRef", "Its dynamic reference is", stringValue),
+  valueCodec("label", "Its sensitivity label is", stringValue),
   valueCodec("$comment", "Its implementation comment is", stringValue),
 
   valueCodec("type", "Its allowed type or types are", simpleTypeOrUniqueArray),

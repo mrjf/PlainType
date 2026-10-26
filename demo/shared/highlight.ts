@@ -26,6 +26,7 @@ export interface Token {
 }
 
 const DIRECTIVES = [
+  "Schema clauses:",
   "Additional properties allowed",
   "Additional properties unspecified",
   "Every instance is accepted.",
