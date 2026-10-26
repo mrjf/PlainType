@@ -2,6 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { SEED, derive, pruneValues, slotAt, stateFromSlots } from "../shared/state.js";
 
 describe("derive", () => {
+  test("saved numbered v3 templates compile with formatted slot links", () => {
+    const view = derive({ ...SEED, ptTemplate: SEED.ptTemplate.replace("***plaintype***", "***plaintype 3***") });
+    expect(view.compiled.ok).toBe(true);
+    if (view.compiled.ok) {
+      expect(view.compiled.formatted).toStartWith("***plaintype***\n");
+      expect(JSON.parse(view.compiled.json).properties.label.maxLength).toBe(24);
+      expect(view.compiled.formattedSpans.map((span) => span.slot)).toEqual(view.raw.spans.map((span) => span.slot));
+    }
+  });
+
   test("the seed renders, compiles, and links every slot in both languages", () => {
     const view = derive(SEED);
     expect(view.compiled.ok).toBe(true);

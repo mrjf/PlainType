@@ -25,6 +25,8 @@ import {
 const HEADER_V1 = "***plaintype 1***";
 const HEADER_V2 = "***plaintype 2***";
 const HEADER_V3 = "***plaintype***";
+// Accept documents saved before the plain header dropped its version number.
+const HEADER_V3_LEGACY = "***plaintype 3***";
 const V3_DEFINITIONS_SECTION = "***definitions***";
 const V3_DEFAULT_LEAD = ". Defaults to ";
 const V3_EXAMPLES_LEAD = ". For example: ";
@@ -162,7 +164,7 @@ function parsePlainTypeDocument(source: string): ParsedDocument {
     ? 1
     : header === HEADER_V2
       ? 2
-      : header === HEADER_V3
+      : (header === HEADER_V3 || header === HEADER_V3_LEGACY)
         ? 3
         : (() => {
             throw new PlainTypeSyntaxError(`Expected ${HEADER_V1}, ${HEADER_V2}, or ${HEADER_V3}`, headerIndex + 1);
