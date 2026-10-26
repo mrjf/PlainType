@@ -37,6 +37,7 @@ const EXACT_ENTRY_LEAD = "Its exact JSON Schema entry is";
 const PROPERTIES_CLAUSE = "Properties:";
 const ALLOWED_TYPES_CLAUSE = "allowed types:";
 const LEGACY_REQUIRED_LEAD = "Its required property names are";
+const V3_SCHEMA_CLAUSES = "Schema clauses:";
 const V2_EXACT_SCHEMA_LEAD = "Exact JSON Schema:";
 const V2_ADDITIONAL_ALLOWED = "Additional properties allowed";
 const V2_ADDITIONAL_UNSPECIFIED = "Additional properties unspecified";
@@ -739,10 +740,10 @@ function renderSchemaV2(
   if (node.type === "boolean") {
     return [`${indent(depth)}- ${node.value ? ALLOW_ALL : DENY_ALL}`];
   }
-  if (node.type !== "object") return renderV2ExactSchema(node, depth);
+  if (node.type !== "object") return renderV2ExactSchema(node, depth, version);
   const dialect = dialectDeclaredBy(node) ?? inheritedDialect;
   const context = v2ReferenceContextFromSchema(node, version === 3 ? concepts : undefined);
-  if (context === null) return renderV2ExactSchema(node, depth);
+  if (context === null) return renderV2ExactSchema(node, depth, version);
   if (dialect === DRAFT_2020_12) {
     const union = v2UnionPlan(node, version);
     if (union !== null) return renderV2Union(union, depth, dialect, context, version);
@@ -751,7 +752,7 @@ function renderSchemaV2(
     const leaf = version === 3 ? v3NamedLeafPlan(node, context) : null;
     if (leaf !== null) return renderV3NamedLeaf(leaf.name, leaf.plan, depth);
   }
-  return renderV2ExactSchema(node, depth);
+  return renderV2ExactSchema(node, depth, version);
 }
 
 function renderV2SchemaAlternative(
@@ -769,10 +770,14 @@ function renderV2SchemaAlternative(
     const leaf = version === 3 ? v3NamedLeafPlan(node, context) : null;
     if (leaf !== null) return renderV3NamedLeaf(leaf.name, leaf.plan, depth);
   }
-  return renderV2ExactSchema(node, depth);
+  return renderV2ExactSchema(node, depth, version);
 }
 
-function renderV2ExactSchema(node: JsonNode, depth: number): string[] {
+function renderV2ExactSchema(node: JsonNode, depth: number, version: ConversationalVersion): string[] {
+  if (version === 3) return [
+    `${indent(depth)}- ${V3_SCHEMA_CLAUSES}`,
+    ...renderSchema(node, depth + 1, DRAFT_2020_12, "structured"),
+  ];
   return [`${indent(depth)}- ${V2_EXACT_SCHEMA_LEAD} ${stringifyJson(node)}`];
 }
 
@@ -1425,6 +1430,12 @@ function schemaFromV3Bullets(
 ): JsonNode {
   const [root, ...definitions] = bullets;
   if (root === undefined) throw new PlainTypeSyntaxError("Expected a schema declaration", 1);
+  if (root.text === V3_SCHEMA_CLAUSES) {
+    if (definitions.length > 0) throw new PlainTypeSyntaxError("Schema clauses must be the only definition", definitions[0]!.line);
+    if (comments.size > 0) throw new PlainTypeSyntaxError("Use implementation comment clauses inside Schema clauses", root.line);
+    if (root.children.length === 0) throw new PlainTypeSyntaxError("Expected schema clauses", root.line);
+    return schemaFromBullets(root.children);
+  }
   const context: V2ReferenceContext = {
     ...v3ReferenceContextFromBullets(root, definitions),
     comments,
