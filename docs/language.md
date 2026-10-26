@@ -765,7 +765,7 @@ losing member order. All version-1 clauses apply recursively. For example:
 - Schema clauses:
   - Its allowed type or types are "array".
   - An array instance may contain at most this many items: 128.
-  - Every item must satisfy:
+  - Its item schema is:
     - Its allowed type or types are "number".
     - A numeric instance must be at least 0.
 ```
