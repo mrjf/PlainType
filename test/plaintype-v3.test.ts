@@ -354,3 +354,15 @@ test("format converts between v2 and v3 and preserves the source version by defa
   assert.equal(formatPlainType(v3, { style: "conversational" }), v2);
   assert.deepEqual(parseJson(toJsonSchema(v2)), parseJson(toJsonSchema(v3)));
 });
+
+
+test("legacy numbered v3 headers compile and format to the canonical header", () => {
+  const canonical = `${HEAD}- :Button: A clickable control.
+  - label - The text - a string between 1 and 24 characters.
+`;
+  for (const prefix of ["", "---\nmodule: button\n---\n"]) {
+    const source = prefix + canonical.replace("***plaintype***", "***plaintype 3***");
+    assert.deepEqual(compile(source), compile(prefix + canonical));
+    assert.equal(formatPlainType(source), formatPlainType(prefix + canonical));
+  }
+});
