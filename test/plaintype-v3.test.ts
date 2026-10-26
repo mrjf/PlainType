@@ -240,7 +240,7 @@ test("$comment round-trips on roots, unions, alternatives, definitions and leave
 
 test("comments the > form cannot carry exactly, or misplaced comments, are handled safely", () => {
   const trailing = JSON.stringify({ title: "T", type: "object", description: "T.", $comment: "ends with space ", properties: {}, required: [] });
-  assert.match(assertV3RoundTrip(trailing), /- Exact JSON Schema:/);
+  assert.match(assertV3RoundTrip(trailing), /- Schema clauses:/);
   const late = JSON.stringify({ description: "A", type: "string", $comment: "after the constraint" });
   assert.match(
     assertV3RoundTrip(JSON.stringify({ title: "T", type: "object", description: "T.", properties: { a: JSON.parse(late) }, required: [] })),
@@ -264,7 +264,7 @@ test("the ***definitions*** section is required, unique, and the only section", 
   assert.throws(() => toJsonSchema(`${HEAD}***definitions***\n- :A: A.`), /Duplicate \*\*\*definitions\*\*\* section/);
 });
 
-test("concept names use ***plain's character set, and other titles fall back to the exact escape", () => {
+test("concept names use ***plain's character set, and other titles use readable schema clauses", () => {
   const json = JSON.stringify({
     title: "Order.Line-2+",
     type: "object",
@@ -274,7 +274,7 @@ test("concept names use ***plain's character set, and other titles fall back to 
     additionalProperties: false,
   });
   assert.match(assertV3RoundTrip(json), /^- :Order\.Line-2\+: A line\.\n {2}- next \(optional\) - The next line - an :Order\.Line-2\+:\.$/m);
-  assert.match(assertV3RoundTrip(JSON.stringify({ ...JSON.parse(json), title: "Order Line" })), /- Exact JSON Schema:/);
+  assert.match(assertV3RoundTrip(JSON.stringify({ ...JSON.parse(json), title: "Order Line" })), /- Schema clauses:/);
 });
 
 test("local file references are written as ***plain linked resources", () => {
