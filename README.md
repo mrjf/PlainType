@@ -233,3 +233,12 @@ schema in a local checkout of the official
 Draft 2020-12 remains the latest published JSON Schema dialect; future and
 custom vocabularies are transported losslessly until a semantic codec is
 explicitly registered rather than inferred.
+
+## The Plain Family
+
+| Project | Purpose | Repo | Studio |
+| --- | --- | --- | --- |
+| **PlainType** | Controlled-natural-language JSON Schema | [mrjf/PlainType](https://github.com/mrjf/PlainType) | [PlainType Studio](https://mrjf.github.io/PlainType/) |
+| **PlainData** | Lossless JSON data notation | [mrjf/PlainData](https://github.com/mrjf/PlainData) | [PlainData Studio](https://mrjf.github.io/PlainData/) |
+| **PlainState** | Deterministic finite state machines | [mrjf/PlainState](https://github.com/mrjf/PlainState) | [PlainState Studio](https://mrjf.github.io/PlainState/) |
+| **PlanView** | Typographic reader for `***plain` documents | [mrjf/PlanView](https://github.com/mrjf/PlanView) | [PlanView Studio](https://mrjf.github.io/PlanView/) |
