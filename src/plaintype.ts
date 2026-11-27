@@ -1045,7 +1045,10 @@ function renderV2Constraint(
   if (typeEntry?.key !== "type") return null;
   const types = v2TypeNames(typeEntry.value);
   if (types === null) return null;
-  const nullableSuffix = arraysEqual(types, ["string", "null"]) || arraysEqual(types, ["integer", "null"])
+  const nullableSuffix =
+    arraysEqual(types, ["string", "null"]) ||
+    arraysEqual(types, ["integer", "null"]) ||
+    arraysEqual(types, ["boolean", "null"])
     ? ", or null"
     : "";
   const principal = nullableSuffix === "" ? types : [types[0] ?? ""];
@@ -1053,6 +1056,7 @@ function renderV2Constraint(
 
   const type = principal[0];
   const rest = entries.slice(1);
+  if (type === "boolean" && rest.length === 0) return `a boolean${nullableSuffix}`;
   if (type === "string") {
     if (rest.length === 0) return `a string${nullableSuffix}`;
     if (
@@ -1539,13 +1543,14 @@ function entriesFromV2Constraint(
 
   const nullable = source.endsWith(", or null");
   const base = nullable ? source.slice(0, -", or null".length) : source;
-  const typeEntry = (type: "string" | "integer"): JsonObjectEntry => ({
+  const typeEntry = (type: "string" | "integer" | "boolean"): JsonObjectEntry => ({
     key: "type",
     value: nullable
       ? arrayNode([{ type: "string", value: type }, { type: "string", value: "null" }])
       : { type: "string", value: type },
   });
 
+  if (base === "a boolean") return [typeEntry("boolean")];
   if (base === "a string") return [typeEntry("string")];
   if (base === "an integer") return [typeEntry("integer")];
   if (base === "a non-negative integer") {
